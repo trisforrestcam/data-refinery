@@ -1,11 +1,11 @@
 export class RefinedDataDto {
-  traceId: string;
-  transactionId: string;
+  traceId!: string;
+  transactionId!: string;
   spanId?: string;
-  serviceName: string;
+  serviceName!: string;
   serviceEnvironment?: string;
-  timestamp: Date;
-  durationUs: number;
+  timestamp!: Date;
+  durationUs!: number;
   transactionName?: string;
   transactionType?: string;
   spanName?: string;
