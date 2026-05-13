@@ -6,49 +6,49 @@ export type ApmRecordDocument = HydratedDocument<ApmRecord>;
 @Schema({ timestamps: true })
 export class ApmRecord {
   @Prop({ required: true })
-  traceId: string;
+  declare traceId: string;
 
   @Prop({ required: true })
-  transactionId: string;
+  declare transactionId: string;
 
   @Prop()
-  spanId: string;
+  declare spanId: string;
 
   @Prop({ required: true })
-  serviceName: string;
+  declare serviceName: string;
 
   @Prop()
-  serviceEnvironment: string;
+  declare serviceEnvironment: string;
 
   @Prop({ required: true })
-  timestamp: Date;
+  declare timestamp: Date;
 
   @Prop({ required: true })
-  durationUs: number;
+  declare durationUs: number;
 
   @Prop()
-  transactionName: string;
+  declare transactionName: string;
 
   @Prop()
-  transactionType: string;
+  declare transactionType: string;
 
   @Prop()
-  spanName: string;
+  declare spanName: string;
 
   @Prop()
-  spanType: string;
+  declare spanType: string;
 
   @Prop()
-  spanSubtype: string;
+  declare spanSubtype: string;
 
   @Prop({ type: Object })
-  metadata: Record<string, any>;
+  declare metadata: Record<string, any>;
 
   @Prop({ type: Object })
-  labels: Record<string, any>;
+  declare labels: Record<string, any>;
 
   @Prop({ default: false })
-  processed: boolean;
+  declare processed: boolean;
 }
 
 export const ApmRecordSchema = SchemaFactory.createForClass(ApmRecord);

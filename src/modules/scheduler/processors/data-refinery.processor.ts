@@ -1,11 +1,15 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
+import {
+  DATA_REFINERY_QUEUE,
+  EXTRACT_TRANSFORM_LOAD_JOB,
+} from '@common/constants/scheduler.constants';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { ExtractorService } from '@modules/extractor/extractor.service';
 import { TransformerService } from '@modules/transformer/transformer.service';
 import { LoaderService } from '@modules/loader/loader.service';
 
-@Processor('data-refinery')
+@Processor(DATA_REFINERY_QUEUE)
 export class DataRefineryProcessor extends WorkerHost {
   private readonly logger = new Logger(DataRefineryProcessor.name);
 
@@ -18,15 +22,19 @@ export class DataRefineryProcessor extends WorkerHost {
   }
 
   async process(job: Job): Promise<void> {
-    if (job.name !== 'extract-transform-load') {
+    if (job.name !== EXTRACT_TRANSFORM_LOAD_JOB) {
       this.logger.warn(`Unknown job name: ${job.name}`);
       return;
     }
 
-    this.logger.log(`Processing job ${job.id} - extracting last ${job.data.timeRangeMinutes} minutes`);
+    this.logger.log(
+      `Processing job ${job.id} - extracting last ${job.data.timeRangeMinutes} minutes`,
+    );
 
     const now = new Date();
-    const from = new Date(now.getTime() - job.data.timeRangeMinutes * 60 * 1000);
+    const from = new Date(
+      now.getTime() - job.data.timeRangeMinutes * 60 * 1000,
+    );
 
     // Extract
     const rawData = await this.extractorService.extract({

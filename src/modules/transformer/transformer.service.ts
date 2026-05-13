@@ -20,7 +20,8 @@ export class TransformerService {
       serviceName: item.service?.name,
       serviceEnvironment: item.service?.environment,
       timestamp,
-      durationUs: item.transaction?.duration?.us || item.span?.duration?.us || 0,
+      durationUs:
+        item.transaction?.duration?.us || item.span?.duration?.us || 0,
       transactionName: item.transaction?.name,
       transactionType: item.transaction?.type,
       spanName: item.span?.name,
