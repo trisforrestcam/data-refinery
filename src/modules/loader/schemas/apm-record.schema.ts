@@ -52,3 +52,15 @@ export class ApmRecord {
 }
 
 export const ApmRecordSchema = SchemaFactory.createForClass(ApmRecord);
+
+// Indexes cho các trường thường xuyên được query trong ETL và analytics
+ApmRecordSchema.index({ traceId: 1 });
+ApmRecordSchema.index({ timestamp: -1 });
+ApmRecordSchema.index({ serviceName: 1, timestamp: -1 });
+
+// Unique index để đảm bảo idempotency (tránh duplicate khi reprocess)
+// spanId có thể undefined với transaction root nên sparse để bỏ qua null
+ApmRecordSchema.index(
+  { transactionId: 1, spanId: 1 },
+  { unique: true, sparse: true },
+);
