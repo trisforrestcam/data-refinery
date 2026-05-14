@@ -41,10 +41,10 @@ export class SchedulerService implements OnModuleInit {
 
     await this.queue.upsertJobScheduler(
       OVERLAY_METRICS_SCHEDULER_ID,
-      { every: 5 * 60 * 1000 }, // 5 minutes
+      { every: 60 * 60 * 1000 }, // 1 hour
       {
         name: OVERLAY_METRICS_JOB,
-        data: { timeRangeMinutes: 5, targets },
+        data: { timeRangeMinutes: 60, targets },
         opts: {
           attempts: 3,
           backoff: { type: 'exponential', delay: 5000 },
@@ -53,7 +53,7 @@ export class SchedulerService implements OnModuleInit {
     );
 
     this.logger.log(
-      `Overlay metrics scheduler registered (every 5 minutes) with ${targets.length} target(s): ${targets.map((t) => t.matchId).join(', ')}`,
+      `Overlay metrics scheduler registered (every 1 hour) with ${targets.length} target(s): ${targets.map((t) => t.matchId).join(', ')}`,
     );
   }
 }
