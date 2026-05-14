@@ -148,7 +148,7 @@ src/
 
 ## Important Notes
 - `.env.example` định nghĩa `TRACKING_ES_INDEX`, `ELASTIC_APM_ENVIRONMENT`, và `INTERNAL_API_KEY`.
-- Scheduler cần targets từ DB (`scheduler_targets` collection, `enabled: true`) hoặc fallback 3 env vars: `OVERLAY_METRICS_TENANT_ID`, `OVERLAY_METRICS_MATCH_ID`, `OVERLAY_METRICS_TIMELINE_IDS` (comma-separated). Nếu thiếu → log warning, không đăng ký scheduler.
+- Scheduler cần targets từ DB (`scheduler_targets` collection, `enabled: true`). Targets được validate qua `TenantCacheService` (chỉ giữ tenants đang active). Nếu có `OVERLAY_METRICS_TENANT_ID` env var, chỉ chạy targets của tenant đó. Nếu không có targets nào → log warning, không đăng ký scheduler.
 - Processor chạy job `extract-transform-load-metrics` mỗi 1 giờ (`every: 3600000`, `timeRangeMinutes: 60`).
 - ES index pattern: `tracking-events-*`. Có thêm `apmIndex: 'traces-apm-*'` trong config.
 - `resolveInterval` logic: ưu tiên explicit `intervalFrom`/`intervalTo` từ job data (hỗ trợ backfill). Nếu không có, tính từ `job.timestamp + delay`, round xuống bội số của intervalMs.

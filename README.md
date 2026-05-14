@@ -114,9 +114,9 @@ TRACKING_ES_INDEX=tracking-events-*
 TRACKING_ES_TIMEOUT_MS=10000
 
 # Scheduler targets (built-in scheduler)
+# Optional: limit scheduler to a single tenant. Targets must be configured via API/DB.
 OVERLAY_METRICS_TENANT_ID=tenant-001
 OVERLAY_METRICS_MATCH_ID=000000000000000000000000
-OVERLAY_METRICS_TIMELINE_IDS=timeline-001,timeline-002
 
 # Server-to-server auth
 INTERNAL_API_KEY=change-me-in-production

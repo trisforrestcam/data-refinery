@@ -341,13 +341,13 @@ export class LoaderService {
 
 **File:** `src/modules/overlay-metrics-etl/scheduler/scheduler.service.ts`
 
-`SchedulerService` implements `OnModuleInit`. Đọc 3 env vars:
+`SchedulerService` implements `OnModuleInit`. Delegate việc lấy targets cho `SchedulerConfigService`.
 
-- `OVERLAY_METRICS_TENANT_ID`
-- `OVERLAY_METRICS_MATCH_ID`
-- `OVERLAY_METRICS_TIMELINE_IDS` (comma-separated)
+`SchedulerConfigService` đọc targets từ DB (`scheduler_targets`, `enabled: true`), sau đó:
+- Lọc theo `OVERLAY_METRICS_TENANT_ID` env var nếu có (chỉ chạy targets của tenant đó).
+- Validate từng target qua `TenantCacheService.has(tenantId)` — bỏ qua nếu tenant không tồn tại trong cache.
 
-Nếu thiếu bất kỳ var nào → log warning và **không đăng ký scheduler**.
+Nếu không có target nào hợp lệ → log warning và **không đăng ký scheduler**.
 
 ```typescript
 @Injectable()
@@ -357,28 +357,25 @@ export class SchedulerService implements OnModuleInit {
   constructor(
     @InjectQueue(OVERLAY_METRICS_QUEUE)
     private readonly queue: Queue,
+    private readonly configService: SchedulerConfigService,
   ) {}
 
   async onModuleInit(): Promise<void> {
-    const tenantId = process.env.OVERLAY_METRICS_TENANT_ID;
-    const matchId = process.env.OVERLAY_METRICS_MATCH_ID;
-    const timelineIds = process.env.OVERLAY_METRICS_TIMELINE_IDS
-      ? process.env.OVERLAY_METRICS_TIMELINE_IDS.split(',').map((s) => s.trim())
-      : [];
+    const targets = await this.configService.getActiveTargets();
 
-    if (!tenantId || !matchId || timelineIds.length === 0) {
+    if (targets.length === 0) {
       this.logger.warn(
-        'Overlay metrics scheduler missing required env vars: OVERLAY_METRICS_TENANT_ID, OVERLAY_METRICS_MATCH_ID, OVERLAY_METRICS_TIMELINE_IDS. Scheduler will not be registered.',
+        'Overlay metrics scheduler: no active targets found. Scheduler will not be registered. Add targets via API or DB.',
       );
       return;
     }
 
     await this.queue.upsertJobScheduler(
       OVERLAY_METRICS_SCHEDULER_ID,
-      { every: 5 * 60 * 1000 }, // 5 minutes
+      { every: 60 * 60 * 1000 }, // 1 hour
       {
         name: OVERLAY_METRICS_JOB,
-        data: { timeRangeMinutes: 5, tenantId, matchId, timelineIds },
+        data: { timeRangeMinutes: 60, targets },
         opts: {
           attempts: 3,
           backoff: { type: 'exponential', delay: 5000 },
@@ -386,7 +383,9 @@ export class SchedulerService implements OnModuleInit {
       },
     );
 
-    this.logger.log('Overlay metrics scheduler registered (every 5 minutes)');
+    this.logger.log(
+      `Overlay metrics scheduler registered (every 1 hour) with ${targets.length} target(s)`,
+    );
   }
 }
 ```

@@ -49,7 +49,7 @@ describe('UC-15 - Skip job khi thiếu timelineIds hoặc tenantId', () => {
   let logSpy: jest.SpyInstance;
 
   const missingRequiredDataWarn =
-    'No timelineIds or tenantId provided, skipping';
+    'No valid targets or timelineIds provided, skipping';
   const validJobData = {
     timeRangeMinutes: 5,
     timelineIds: ['tl-1'],

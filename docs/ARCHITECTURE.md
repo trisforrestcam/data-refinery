@@ -407,7 +407,7 @@ Helper `parseIntOrDefault(value, defaultValue)` parse số an toàn, fallback kh
 | `ELASTIC_APM_ENVIRONMENT` | `development` | ES environment filter |
 | `OVERLAY_METRICS_TENANT_ID` | — | Tenant ID cho scheduler built-in |
 | `OVERLAY_METRICS_MATCH_ID` | — | Match ID cho scheduler built-in |
-| `OVERLAY_METRICS_TIMELINE_IDS` | — | Comma-separated timeline IDs cho scheduler |
+
 | `INTERNAL_API_KEY` | — | API key cho server-to-server auth |
 | `TZ` | `Asia/Ho_Chi_Minh` | Timezone |
 
@@ -422,7 +422,7 @@ Helper `parseIntOrDefault(value, defaultValue)` parse số an toàn, fallback kh
 - **Retry:** 3 attempts, exponential backoff (`delay: 5000ms`)
 - **Job data:** `{ timeRangeMinutes: 5, tenantId, matchId, timelineIds }`
 
-Nếu thiếu `OVERLAY_METRICS_TENANT_ID`, `OVERLAY_METRICS_MATCH_ID`, hoặc `OVERLAY_METRICS_TIMELINE_IDS`, scheduler sẽ không đăng ký job và log warning.
+Scheduler đọc targets từ DB (`scheduler_targets`, `enabled: true`) và validate tenant qua `TenantCacheService`. Nếu có `OVERLAY_METRICS_TENANT_ID` env var, chỉ chạy targets của tenant đó. Nếu không có target nào, scheduler sẽ không đăng ký job và log warning.
 
 ---
 

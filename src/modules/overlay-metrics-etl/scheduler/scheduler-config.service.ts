@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { SchedulerTarget } from '@domain/schemas/scheduler-target.schema';
+import { TenantCacheService } from '@common/modules/tenant-cache/tenant-cache.service';
 
 /**
  * Interface định nghĩa cấu hình scheduler cho một match đang live.
@@ -25,45 +26,51 @@ export class SchedulerConfigService {
   constructor(
     @InjectModel(SchedulerTarget.name)
     private readonly targetModel: Model<SchedulerTarget>,
+    private readonly tenantCache: TenantCacheService,
   ) {}
 
   /**
    * Lấy danh sách targets đang active từ DB.
-   * Nếu DB chưa có data, fallback về env vars.
+   * Targets được lọc theo OVERLAY_METRICS_TENANT_ID env var (nếu có) và validate tenant tồn tại trong cache.
    */
   async getActiveTargets(): Promise<SchedulerTargetConfig[]> {
+    let targets: SchedulerTargetConfig[];
+
     try {
       const dbTargets = await this.targetModel
         .find({ enabled: true })
         .lean()
         .exec();
 
-      if (dbTargets.length > 0) {
-        return dbTargets.map((t) => ({
-          tenantId: t.tenantId,
-          matchId: t.matchId,
-          timelineIds: t.timelineIds,
-          enabled: t.enabled,
-        }));
-      }
+      targets = dbTargets.map((t) => ({
+        tenantId: t.tenantId,
+        matchId: t.matchId,
+        timelineIds: t.timelineIds,
+        enabled: t.enabled,
+      }));
     } catch (error) {
       this.logger.warn(
-        `Failed to read scheduler targets from DB: ${(error as Error).message}. Falling back to env vars.`,
+        `Failed to read scheduler targets from DB: ${(error as Error).message}.`,
       );
-    }
-
-    // Fallback to env vars
-    const tenantId = process.env.OVERLAY_METRICS_TENANT_ID;
-    const matchId = process.env.OVERLAY_METRICS_MATCH_ID;
-    const timelineIds = process.env.OVERLAY_METRICS_TIMELINE_IDS
-      ? process.env.OVERLAY_METRICS_TIMELINE_IDS.split(',').map((s) => s.trim())
-      : [];
-
-    if (!tenantId || !matchId || timelineIds.length === 0) {
       return [];
     }
 
-    return [{ tenantId, matchId, timelineIds, enabled: true }];
+    const envTenantId = process.env.OVERLAY_METRICS_TENANT_ID;
+    if (envTenantId) {
+      targets = targets.filter((t) => t.tenantId === envTenantId);
+    }
+
+    targets = targets.filter((t) => {
+      if (!this.tenantCache.has(t.tenantId)) {
+        this.logger.warn(
+          `Tenant ${t.tenantId} not found in cache, skipping target for match ${t.matchId}`,
+        );
+        return false;
+      }
+      return true;
+    });
+
+    return targets;
   }
 
   /**

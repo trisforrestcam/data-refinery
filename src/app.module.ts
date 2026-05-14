@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { BullModule } from '@nestjs/bullmq';
+import Redis from 'ioredis';
 import { ElasticsearchCoreModule } from '@common/modules/elasticsearch-core.module';
 import { TenantCacheModule } from '@common/modules/tenant-cache/tenant-cache.module';
 import appConfig from '@config/app.config';
@@ -20,23 +21,39 @@ import { TenantManagementModule } from '@modules/tenant-management/tenant-manage
     }),
     MongooseModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => {
-        const env = configService.get<string>('app.env') || 'development';
-        return {
-          uri: configService.get<string>('mongo.uri'),
-          ...(env !== 'production' && { debug: true }),
-        };
-      },
+      useFactory: (configService: ConfigService) => ({
+        uri: configService.get<string>('mongo.uri'),
+      }),
     }),
     BullModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('redis.host'),
-          port: configService.get<number>('redis.port'),
-          password: configService.get<string>('redis.password') || undefined,
-        },
-      }),
+      useFactory: (configService: ConfigService) => {
+        const isCluster = configService.get<boolean>('redis.isCluster');
+
+        if (isCluster) {
+          const nodes = configService.get<
+            { host: string; port: number }[]
+          >('redis.clusterNodes')!;
+          const password =
+            configService.get<string>('redis.password') || undefined;
+          return {
+            connection: new Redis.Cluster(nodes, {
+              redisOptions: {
+                password,
+                maxRetriesPerRequest: null,
+              },
+            }),
+          };
+        }
+
+        return {
+          connection: {
+            host: configService.get<string>('redis.host'),
+            port: configService.get<number>('redis.port'),
+            password: configService.get<string>('redis.password') || undefined,
+          },
+        };
+      },
     }),
     ElasticsearchCoreModule,
     TenantCacheModule,

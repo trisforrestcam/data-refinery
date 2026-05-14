@@ -34,7 +34,7 @@ export class SchedulerService implements OnModuleInit {
 
     if (targets.length === 0) {
       this.logger.warn(
-        'Overlay metrics scheduler: no active targets found. Scheduler will not be registered. Set env vars (OVERLAY_METRICS_TENANT_ID, OVERLAY_METRICS_MATCH_ID, OVERLAY_METRICS_TIMELINE_IDS) or add targets via API.',
+        'Overlay metrics scheduler: no active targets found. Scheduler will not be registered. Add targets via API or DB.',
       );
       return;
     }

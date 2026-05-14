@@ -8,6 +8,7 @@ import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extract
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
 import { OverlayMetricsProcessor } from '@modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
 import { SchedulerService } from '@modules/overlay-metrics-etl/scheduler/scheduler.service';
+import { SchedulerConfigService } from '@modules/overlay-metrics-etl/scheduler/scheduler-config.service';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
 
 type ExtractorMethod =
@@ -187,7 +188,7 @@ describe('UC-11 - Elasticsearch connection error retry', () => {
         'Timeline timeline-es-001 processing failed: Elasticsearch connection lost',
       );
       expect(errorSpy.mock.calls[1][0]).toContain(
-        'Timeline timeline-es-001 failed, skipping remaining timelines',
+        'Target match-es-001 / Timeline timeline-es-001 failed: Elasticsearch connection lost',
       );
 
       // Other extractors not called because processor stopped at platform failure
@@ -214,16 +215,22 @@ describe('UC-11 - Elasticsearch connection error retry', () => {
   describe('scheduler retry policy', () => {
     let moduleRef: TestingModule;
     let queueMock: { upsertJobScheduler: jest.Mock };
-    let originalEnv: NodeJS.ProcessEnv;
+    let schedulerConfigMock: { getActiveTargets: jest.Mock };
 
     beforeEach(async () => {
-      originalEnv = { ...process.env };
-      process.env.OVERLAY_METRICS_TENANT_ID = jobData.tenantId;
-      process.env.OVERLAY_METRICS_MATCH_ID = jobData.matchId;
-      process.env.OVERLAY_METRICS_TIMELINE_IDS = jobData.timelineIds.join(',');
-
       queueMock = {
         upsertJobScheduler: jest.fn().mockResolvedValue(undefined),
+      };
+
+      schedulerConfigMock = {
+        getActiveTargets: jest.fn().mockResolvedValue([
+          {
+            tenantId: jobData.tenantId,
+            matchId: jobData.matchId,
+            timelineIds: jobData.timelineIds,
+            enabled: true,
+          },
+        ]),
       };
 
       moduleRef = await Test.createTestingModule({
@@ -233,12 +240,15 @@ describe('UC-11 - Elasticsearch connection error retry', () => {
             provide: getQueueToken(OVERLAY_METRICS_QUEUE),
             useValue: queueMock,
           },
+          {
+            provide: SchedulerConfigService,
+            useValue: schedulerConfigMock,
+          },
         ],
       }).compile();
     });
 
     afterEach(async () => {
-      process.env = originalEnv;
       await moduleRef.close();
       jest.restoreAllMocks();
     });
@@ -251,14 +261,19 @@ describe('UC-11 - Elasticsearch connection error retry', () => {
       expect(queueMock.upsertJobScheduler).toHaveBeenCalledTimes(1);
       expect(queueMock.upsertJobScheduler).toHaveBeenCalledWith(
         OVERLAY_METRICS_SCHEDULER_ID,
-        { every: 5 * 60 * 1000 },
+        { every: 60 * 60 * 1000 },
         {
           name: OVERLAY_METRICS_JOB,
           data: {
-            timeRangeMinutes: 5,
-            tenantId: jobData.tenantId,
-            matchId: jobData.matchId,
-            timelineIds: jobData.timelineIds,
+            timeRangeMinutes: 60,
+            targets: [
+              {
+                tenantId: jobData.tenantId,
+                matchId: jobData.matchId,
+                timelineIds: jobData.timelineIds,
+                enabled: true,
+              },
+            ],
           },
           opts: {
             attempts: 3,
