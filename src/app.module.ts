@@ -10,6 +10,7 @@ import redisConfig from '@config/redis.config';
 import elasticsearchConfig from '@config/elasticsearch.config';
 import { EtlModule } from '@modules/overlay-metrics-etl/etl.module';
 import { ApiModule } from '@modules/overlay-metrics-api/api.module';
+import { TenantManagementModule } from '@modules/tenant-management/tenant-management.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { ApiModule } from '@modules/overlay-metrics-api/api.module';
     TenantCacheModule,
     EtlModule,
     ApiModule,
+    TenantManagementModule,
   ],
 })
 export class AppModule {}

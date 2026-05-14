@@ -1,12 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getQueueToken } from '@nestjs/bullmq';
 import { MetricsApiController } from '@modules/overlay-metrics-api/metrics-api.controller';
 import { MetricsApiService } from '@modules/overlay-metrics-api/metrics-api.service';
 import { InternalApiGuard } from '@common/guards/internal-api.guard';
 import { MetricsQueryDto } from '@modules/overlay-metrics-api/dto/metrics-query.dto';
 import { OverlayMetricsRepository } from '@infrastructure/persistence/overlay-metrics.repository';
+import { SchedulerConfigService } from '@modules/overlay-metrics-etl/scheduler/scheduler-config.service';
 import { MetricType } from '@domain/enums/metric-type.enum';
+import { OVERLAY_METRICS_QUEUE } from '@common/constants/scheduler.constants';
 
 describe('UC-19 - Read API tests', () => {
   const tenantId = 'tenant-read-001';
@@ -72,6 +75,8 @@ describe('UC-19 - Read API tests', () => {
         providers: [
           MetricsApiService,
           { provide: OverlayMetricsRepository, useValue: repository },
+          { provide: getQueueToken(OVERLAY_METRICS_QUEUE), useValue: { add: jest.fn() } },
+          { provide: SchedulerConfigService, useValue: { getActiveTargets: jest.fn(), upsertTarget: jest.fn(), disableTarget: jest.fn() } },
         ],
       }).compile();
 
@@ -80,13 +85,13 @@ describe('UC-19 - Read API tests', () => {
 
     it('filter chỉ có tenantId khi query rỗng', async () => {
       await service.getPlatformMetrics(tenantId, {});
-      expect(repository.find).toHaveBeenCalledWith(MetricType.PLATFORM, { tenantId });
+      expect(repository.find).toHaveBeenCalledWith(tenantId, MetricType.PLATFORM, { tenantId });
     });
 
     it('filter có matchId equality', async () => {
       const query: MetricsQueryDto = { matchId: 'match-123' };
       await service.getPlatformMetrics(tenantId, query);
-      expect(repository.find).toHaveBeenCalledWith(MetricType.PLATFORM, {
+      expect(repository.find).toHaveBeenCalledWith(tenantId, MetricType.PLATFORM, {
         tenantId,
         matchId: 'match-123',
       });
@@ -95,7 +100,7 @@ describe('UC-19 - Read API tests', () => {
     it('filter có timelineIds $in array', async () => {
       const query: MetricsQueryDto = { timelineIds: ['tl-1', 'tl-2'] };
       await service.getDeviceBreakdown(tenantId, query);
-      expect(repository.find).toHaveBeenCalledWith(MetricType.DEVICE, {
+      expect(repository.find).toHaveBeenCalledWith(tenantId, MetricType.DEVICE, {
         tenantId,
         timelineId: { $in: ['tl-1', 'tl-2'] },
       });
@@ -107,7 +112,7 @@ describe('UC-19 - Read API tests', () => {
         to: '2024-01-02T00:00:00Z',
       };
       await service.getTransportComparison(tenantId, query);
-      expect(repository.find).toHaveBeenCalledWith(MetricType.TRANSPORT, {
+      expect(repository.find).toHaveBeenCalledWith(tenantId, MetricType.TRANSPORT, {
         tenantId,
         intervalFrom: {
           $gte: new Date('2024-01-01T00:00:00Z'),
@@ -124,7 +129,7 @@ describe('UC-19 - Read API tests', () => {
         to: '2024-01-02T00:00:00Z',
       };
       await service.getFailures(tenantId, query);
-      expect(repository.find).toHaveBeenCalledWith(MetricType.FAILURE, {
+      expect(repository.find).toHaveBeenCalledWith(tenantId, MetricType.FAILURE, {
         tenantId,
         matchId: 'match-abc',
         timelineId: { $in: ['tl-1'] },
@@ -137,7 +142,7 @@ describe('UC-19 - Read API tests', () => {
 
     it('timeseries filter thêm metric name', async () => {
       await service.getTimeseries(tenantId, {}, 'sent');
-      expect(repository.find).toHaveBeenCalledWith(MetricType.TIMESERIES, {
+      expect(repository.find).toHaveBeenCalledWith(tenantId, MetricType.TIMESERIES, {
         tenantId,
         metric: 'sent',
       });
