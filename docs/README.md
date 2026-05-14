@@ -8,6 +8,7 @@
 
 | File | Nội dung |
 |------|----------|
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Tài liệu kiến trúc chi tiết: ETL flow, ES queries, MongoDB indexes, env vars |
 | [`01-overview.md`](01-overview.md) | Kiến trúc tổng quan, luồng dữ liệu, các collection MongoDB |
 | [`02-es-aggregations.md`](02-es-aggregations.md) | Toàn bộ ES aggregation queries (100% logic tính toán ở ES) |
 | [`03-mongo-schemas.md`](03-mongo-schemas.md) | MongoDB schemas + indexes cho pre-aggregated data |
@@ -50,13 +51,15 @@ Backend API (read-only)
 
 | Tab | ES Aggregation | MongoDB Collection | API |
 |-----|---------------|-------------------|-----|
-| **Tổng quan** | `platform` terms + stage filters | `overlay_metrics_platform` | `GET /:matchId/platform-metrics` |
-| **Thiết bị** | `browser/os/device_class` terms | `overlay_metrics_device` | `GET /:matchId/device-breakdown` |
-| **Transport** | `transport_mode` terms | `overlay_metrics_transport` | `GET /:matchId/transport-comparison` |
-| **SDK** | `sdk_version` terms | `overlay_metrics_sdk` | `GET /:matchId/sdk-versions` |
-| **Lỗi** | `failure_reason` + `failure_step` terms | `overlay_metrics_failure` | `GET /:matchId/failures` |
-| **Thờ gian** | `date_histogram` + metric agg | `overlay_metrics_timeseries` | `GET /:matchId/timeseries` |
-| **Latency** | `percentiles` + `stats` | `overlay_metrics_latency` | `GET /:matchId/latency` |
+| **Tổng quan** | `platform` terms + stage filters | `overlay_metrics_platform` | `GET /metrics/platform` |
+| **Thiết bị** | `browser/os/device_class` terms | `overlay_metrics_device` | `GET /metrics/device` |
+| **Transport** | `transport_mode` terms | `overlay_metrics_transport` | `GET /metrics/transport` |
+| **SDK** | `sdk_version` terms | `overlay_metrics_sdk` | `GET /metrics/sdk` |
+| **Lỗi** | `failure_reason` + `failure_step` terms | `overlay_metrics_failure` | `GET /metrics/failures` |
+| **Thờ gian** | `date_histogram` + metric agg | `overlay_metrics_timeseries` | `GET /metrics/timeseries` |
+| **Latency** | `percentiles` + `stats` | `overlay_metrics_latency` | `GET /metrics/latency` |
+
+> **🔐 Auth:** Tất cả API endpoints đều yêu cầu header `x-internal-api-key` (do `InternalApiGuard` kiểm tra) và `x-tenant-id`.
 
 ---
 
@@ -82,16 +85,10 @@ npm install
 
 ```bash
 cp .env.example .env
-# Edit .env với ES tracking index, MongoDB URI, Redis config
+# Edit .env với ES tracking index, MongoDB URI, Redis config, INTERNAL_API_KEY
 ```
 
-### 3. Chạy migration (nếu cần backfill)
-
-```bash
-npx ts-node migration/backfill-overlay-metrics.ts
-```
-
-### 4. Start app
+### 3. Start app
 
 ```bash
 npm run start:dev

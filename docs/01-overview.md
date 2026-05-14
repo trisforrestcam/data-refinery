@@ -40,7 +40,7 @@ Không pull raw documents. Dùng **ES aggregations** để tính sẵn:
 
 - Map ES aggregation buckets sang DTO
 - Tính derived metrics (rate, percentile, v.v.)
-- Gán `timelineId`, `matchId`, `tenantId`, `questionId`
+- Gán `timelineId`, `matchId`, `tenantId`
 - Thêm `processedAt`, `intervalFrom`, `intervalTo`
 
 ### 3. Load — MongoDB Bulk Write
@@ -74,35 +74,65 @@ Không pull raw documents. Dùng **ES aggregations** để tính sẵn:
 
 ```
 src/
-├── modules/
-│   ├── extractor/
-│   │   ├── extractor.service.ts              # Orchestrate extract jobs
-│   │   ├── elasticsearch/
-│   │   │   └── tracking-es.service.ts        # ES aggregations cho tracking
-│   │   └── dto/
-│   │       └── tracking-aggs-query.dto.ts    # Query params cho ES agg
-│   ├── transformer/
-│   │   ├── transformer.service.ts            # Map ES agg → MongoDB DTO
-│   │   └── dto/
-│   │       ├── platform-metric.dto.ts
-│   │       ├── device-breakdown.dto.ts
-│   │       ├── transport-comparison.dto.ts
-│   │       ├── sdk-version.dto.ts
-│   │       ├── failure-analysis.dto.ts
-│   │       ├── latency-percentile.dto.ts
-│   │       └── timeseries-point.dto.ts
-│   ├── loader/
-│   │   ├── loader.service.ts                 # Bulk write MongoDB
-│   │   ├── schemas/
-│   │   │   ├── overlay-metrics.schema.ts     # Platform, device, transport, SDK
-│   │   │   ├── overlay-latency.schema.ts
-│   │   │   └── overlay-timeseries.schema.ts
-│   │   └── repositories/
-│   │       └── overlay-metrics.repository.ts
-│   └── scheduler/
-│       ├── scheduler.service.ts              # upsertJobScheduler mỗi 5 phút
-│       └── processors/
-│           └── overlay-metrics.processor.ts  # Job: extract-transform-load-metrics
+├── config/
+│   ├── app.config.ts
+│   ├── mongo.config.ts
+│   ├── redis.config.ts
+│   └── elasticsearch.config.ts
+├── common/
+│   ├── constants/
+│   ├── guards/
+│   │   └── internal-api.guard.ts
+│   ├── interfaces/
+│   └── modules/
+│       └── elasticsearch-core.module.ts
+├── domain/
+│   ├── enums/
+│   │   └── metric-type.enum.ts
+│   ├── dto/
+│   │   ├── platform-metric.dto.ts
+│   │   ├── device-breakdown.dto.ts
+│   │   ├── transport-comparison.dto.ts
+│   │   ├── sdk-version.dto.ts
+│   │   ├── failure-analysis.dto.ts
+│   │   ├── latency-percentile.dto.ts
+│   │   └── timeseries-point.dto.ts
+│   └── schemas/
+│       ├── overlay-metrics-platform.schema.ts
+│       ├── overlay-metrics-device.schema.ts
+│       ├── overlay-metrics-transport.schema.ts
+│       ├── overlay-metrics-sdk.schema.ts
+│       ├── overlay-metrics-failure.schema.ts
+│       ├── overlay-metrics-timeseries.schema.ts
+│       └── overlay-metrics-latency.schema.ts
+├── infrastructure/
+│   └── persistence/
+│       ├── persistence.module.ts
+│       ├── metric-meta.ts
+│       └── overlay-metrics.repository.ts
+└── modules/
+    ├── overlay-metrics-etl/
+    │   ├── etl.module.ts
+    │   ├── extractor/
+    │   │   ├── extractor.service.ts
+    │   │   ├── elasticsearch/
+    │   │   │   └── tracking-es.service.ts
+    │   │   └── dto/
+    │   │       └── tracking-agg-query.dto.ts
+    │   ├── transformer/
+    │   │   └── transformer.service.ts
+    │   ├── loader/
+    │   │   └── loader.service.ts
+    │   └── scheduler/
+    │       ├── scheduler.service.ts
+    │       └── processors/
+    │           └── overlay-metrics.processor.ts
+    └── overlay-metrics-api/
+        ├── api.module.ts
+        ├── metrics-api.controller.ts
+        ├── metrics-api.service.ts
+        └── dto/
+            └── metrics-query.dto.ts
 ```
 
 ## Timeline thực hiện

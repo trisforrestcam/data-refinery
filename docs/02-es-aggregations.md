@@ -2,6 +2,8 @@
 
 > Tài liệu này định nghĩa toàn bộ Elasticsearch aggregation queries được dùng trong ETL pipeline. **Mục tiêu: đưa 100% logic tính toán vào ES query**, Transformer chỉ cần map buckets sang DTO.
 
+> **Note:** ES Client v9 dùng flat query (không `body` wrapper). Toàn bộ queries được triển khai trong `src/modules/overlay-metrics-etl/extractor/elasticsearch/tracking-es.service.ts`.
+
 ## 1. Platform Metrics (Tổng quan)
 
 ```json

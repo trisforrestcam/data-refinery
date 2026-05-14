@@ -1,6 +1,8 @@
 # Transformer DTOs — MongoDB Document Shapes
 
 > Các DTO này định nghĩa shape của documents sau khi Transformer xử lý ES aggregations. Đây là interface contract giữa Transformer và Loader.
+>
+> **Location:** `src/domain/dto/`
 
 ---
 
@@ -19,6 +21,7 @@ export class PlatformMetricDto {
   receiveRate!: number;        // received / sent * 100
   renderRate!: number;         // rendered / sent * 100
   failureRate!: number;        // failed / received * 100
+  netSuccessRate!: number;     // rendered / sent * 100
   avgRenderMs!: number;        // avg(render_duration_ms)
   intervalFrom!: Date;
   intervalTo!: Date;
@@ -106,7 +109,7 @@ export class FailureAnalysisDto {
 ## LatencyPercentileDto
 
 ```typescript
-export interface PercentileSet {
+export class PercentileSet {
   p50: number;
   p75: number;
   p95: number;
@@ -115,7 +118,7 @@ export interface PercentileSet {
   max: number;
 }
 
-export interface RenderDurationSet {
+export class RenderDurationSet {
   p50: number;
   p95: number;
   p99: number;

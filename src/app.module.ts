@@ -7,10 +7,8 @@ import appConfig from '@config/app.config';
 import mongoConfig from '@config/mongo.config';
 import redisConfig from '@config/redis.config';
 import elasticsearchConfig from '@config/elasticsearch.config';
-import { ExtractorModule } from '@modules/extractor/extractor.module';
-import { TransformerModule } from '@modules/transformer/transformer.module';
-import { LoaderModule } from '@modules/loader/loader.module';
-import { SchedulerModule } from '@modules/scheduler/scheduler.module';
+import { EtlModule } from '@modules/overlay-metrics-etl/etl.module';
+import { ApiModule } from '@modules/overlay-metrics-api/api.module';
 
 @Module({
   imports: [
@@ -35,10 +33,8 @@ import { SchedulerModule } from '@modules/scheduler/scheduler.module';
       }),
     }),
     ElasticsearchCoreModule,
-    ExtractorModule,
-    TransformerModule,
-    LoaderModule,
-    SchedulerModule,
+    EtlModule,
+    ApiModule,
   ],
 })
 export class AppModule {}

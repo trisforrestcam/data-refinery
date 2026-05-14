@@ -1,297 +1,33 @@
-# Implementation Guide — ETL Pipeline chi tiết
+# 05 — Implementation Guide
 
-## 1. Extractor Module
+Tài liệu này mô tả chi tiết cách triển khai từng tầng của ETL pipeline và Read API, dựa trên source code thực tế trong repository.
 
-### File: `src/modules/extractor/elasticsearch/tracking-es.service.ts`
+---
 
-Service này thay thế `ApmElasticsearchService` hiện tại, chuyên dùng cho **tracking index** (không phải APM index).
+## 1. Overview
 
-```typescript
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { ElasticsearchService } from '@nestjs/elasticsearch';
+Hệ thống gồm 2 domain feature chính:
 
-export interface TrackingAggQuery {
-  timelineIds?: string[];
-  mediaContentId?: string;
-  tenantId: string;
-  from?: Date;
-  to?: Date;
-  platform?: string;
-}
+- **`overlay-metrics-etl`** — Pipeline Extract → Transform → Load, chạy định kỳ 5 phút/lần qua BullMQ.
+- **`overlay-metrics-api`** — Read API để internal services query dữ liệu đã pre-aggregate từ MongoDB.
 
-export interface TrackingAggResult {
-  aggregations: Record<string, any>;
-  took: number;
-}
-
-@Injectable()
-export class TrackingEsService {
-  private readonly logger = new Logger(TrackingEsService.name);
-
-  constructor(
-    private readonly esService: ElasticsearchService,
-    private readonly configService: ConfigService,
-  ) {}
-
-  private getIndex(): string {
-    return this.configService.getOrThrow<string>('TRACKING_ES_INDEX');
-  }
-
-  private buildBaseQuery(query: TrackingAggQuery): Record<string, any> {
-    const must: any[] = [
-      { term: { 'labels.tenant_id': query.tenantId } },
-      { term: { 'labels.environment': this.configService.get('ELASTIC_APM_ENVIRONMENT', 'development') } },
-    ];
-
-    if (query.timelineIds?.length) {
-      must.push({ terms: { 'labels.timeline_id': query.timelineIds } });
-    }
-
-    if (query.mediaContentId) {
-      must.push({ term: { 'labels.media_content_id': query.mediaContentId } });
-    }
-
-    if (query.from && query.to) {
-      must.push({
-        range: {
-          '@timestamp': {
-            gte: query.from.toISOString(),
-            lte: query.to.toISOString(),
-          },
-        },
-      });
-    }
-
-    if (query.platform) {
-      must.push({ term: { 'labels.platform': query.platform } });
-    }
-
-    return { bool: { must } };
-  }
-
-  async queryPlatformMetrics(query: TrackingAggQuery): Promise<TrackingAggResult> {
-    const esQuery = this.buildBaseQuery(query);
-    
-    const result = await this.esService.search({
-      index: this.getIndex(),
-      size: 0,
-      query: esQuery,
-      aggs: {
-        platforms: {
-          terms: { field: 'labels.platform', size: 100, missing: 'unknown' },
-          aggs: {
-            sent: {
-              filter: { term: { 'labels.stage': 'sent' } },
-              aggs: { room_size_sum: { sum: { field: 'numeric_labels.room_size' } } },
-            },
-            received: { filter: { term: { 'labels.stage': 'received' } } },
-            rendered: {
-              filter: { term: { 'labels.stage': 'rendered' } },
-              aggs: { avg_render_ms: { avg: { field: 'numeric_labels.render_duration_ms' } } },
-            },
-            failed: { filter: { term: { 'labels.stage': 'render-failed' } } },
-          },
-        },
-      },
-    });
-
-    return { aggregations: (result as any).aggregations, took: (result as any).took };
-  }
-
-  async queryDeviceBreakdown(query: TrackingAggQuery, dimension: string): Promise<TrackingAggResult> {
-    const fieldMap: Record<string, string> = {
-      browser: 'labels.browser',
-      os: 'labels.client_os',
-      deviceClass: 'labels.device_class',
-    };
-
-    const esQuery = this.buildBaseQuery(query);
-
-    const result = await this.esService.search({
-      index: this.getIndex(),
-      size: 0,
-      query: esQuery,
-      aggs: {
-        by_dimension: {
-          terms: { field: fieldMap[dimension] || fieldMap.browser, size: 50, missing: 'unknown' },
-          aggs: {
-            by_stage: {
-              filters: {
-                filters: {
-                  received: { term: { 'labels.stage': 'received' } },
-                  rendered: { term: { 'labels.stage': 'rendered' } },
-                  failed: { term: { 'labels.stage': 'render-failed' } },
-                },
-              },
-              aggs: {
-                avg_render_ms: { avg: { field: 'numeric_labels.render_duration_ms' } },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    return { aggregations: (result as any).aggregations, took: (result as any).took };
-  }
-
-  async queryTransportComparison(query: TrackingAggQuery): Promise<TrackingAggResult> {
-    const esQuery = this.buildBaseQuery(query);
-
-    const result = await this.esService.search({
-      index: this.getIndex(),
-      size: 0,
-      query: esQuery,
-      aggs: {
-        by_transport: {
-          terms: { field: 'labels.transport_mode', size: 10, missing: 'unknown' },
-          aggs: {
-            by_stage: {
-              filters: {
-                filters: {
-                  received: { term: { 'labels.stage': 'received' } },
-                  rendered: { term: { 'labels.stage': 'rendered' } },
-                },
-              },
-              aggs: {
-                avg_render_ms: { avg: { field: 'numeric_labels.render_duration_ms' } },
-                p95_render_ms: { percentiles: { field: 'numeric_labels.render_duration_ms', percents: [95] } },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    return { aggregations: (result as any).aggregations, took: (result as any).took };
-  }
-
-  async querySdkVersions(query: TrackingAggQuery): Promise<TrackingAggResult> {
-    const esQuery = this.buildBaseQuery(query);
-
-    const result = await this.esService.search({
-      index: this.getIndex(),
-      size: 0,
-      query: esQuery,
-      aggs: {
-        by_sdk_version: {
-          terms: { field: 'labels.sdk_version', size: 50, missing: 'unknown' },
-          aggs: {
-            by_stage: {
-              filters: {
-                filters: {
-                  received: { term: { 'labels.stage': 'received' } },
-                  rendered: { term: { 'labels.stage': 'rendered' } },
-                },
-              },
-              aggs: {
-                avg_render_ms: { avg: { field: 'numeric_labels.render_duration_ms' } },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    return { aggregations: (result as any).aggregations, took: (result as any).took };
-  }
-
-  async queryFailures(query: TrackingAggQuery): Promise<TrackingAggResult> {
-    const esQuery = this.buildBaseQuery(query);
-
-    const result = await this.esService.search({
-      index: this.getIndex(),
-      size: 0,
-      query: esQuery,
-      aggs: {
-        by_reason: {
-          terms: { field: 'labels.failure_reason', size: 50 },
-          aggs: {
-            by_step: { terms: { field: 'labels.failure_step', size: 20 } },
-          },
-        },
-      },
-    });
-
-    return { aggregations: (result as any).aggregations, took: (result as any).took };
-  }
-
-  async queryLatency(query: TrackingAggQuery): Promise<TrackingAggResult> {
-    const esQuery = this.buildBaseQuery(query);
-
-    const result = await this.esService.search({
-      index: this.getIndex(),
-      size: 0,
-      query: esQuery,
-      aggs: {
-        receive_latency: { percentiles: { field: 'numeric_labels.receive_latency_ms', percents: [50, 75, 95, 99] } },
-        render_latency: { percentiles: { field: 'numeric_labels.render_duration_ms', percents: [50, 75, 95, 99] } },
-        ack_latency: { percentiles: { field: 'numeric_labels.ack_latency_ms', percents: [50, 75, 95, 99] } },
-        receive_stats: { stats: { field: 'numeric_labels.receive_latency_ms' } },
-        render_stats: { stats: { field: 'numeric_labels.render_duration_ms' } },
-        ack_stats: { stats: { field: 'numeric_labels.ack_latency_ms' } },
-        render_duration: { percentiles: { field: 'numeric_labels.render_duration_ms', percents: [50, 95, 99] } },
-      },
-    });
-
-    return { aggregations: (result as any).aggregations, took: (result as any).took };
-  }
-
-  async queryTimeseries(
-    query: TrackingAggQuery,
-    metric: string,
-    interval: string,
-  ): Promise<TrackingAggResult> {
-    const esQuery = this.buildBaseQuery(query);
-
-    const metricMap: Record<string, { type: string; field?: string }> = {
-      sent: { type: 'sum', field: 'numeric_labels.room_size' },
-      received: { type: 'count' },
-      rendered: { type: 'count' },
-      failed: { type: 'count' },
-      avgRenderMs: { type: 'avg', field: 'numeric_labels.render_duration_ms' },
-    };
-
-    const config = metricMap[metric] || metricMap.sent;
-    let metricAgg: Record<string, any> = {};
-
-    if (config.type === 'sum') {
-      metricAgg = { sum: { field: config.field } };
-    } else if (config.type === 'avg') {
-      metricAgg = { avg: { field: config.field } };
-    } else if (['received', 'rendered', 'failed'].includes(metric)) {
-      const stageMap: Record<string, string> = {
-        received: 'received',
-        rendered: 'rendered',
-        failed: 'render-failed',
-      };
-      metricAgg = { filter: { term: { 'labels.stage': stageMap[metric] } } };
-    }
-
-    const result = await this.esService.search({
-      index: this.getIndex(),
-      size: 0,
-      query: esQuery,
-      aggs: {
-        timeseries: {
-          date_histogram: { field: '@timestamp', fixed_interval: interval },
-          aggs: { metric_value: metricAgg },
-        },
-      },
-    });
-
-    return { aggregations: (result as any).aggregations, took: (result as any).took };
-  }
-}
+```
+Scheduler (BullMQ) → Processor → Extractor (ES agg) → Transformer → Loader → Repository → MongoDB
+                                           ↑                                              ↓
+                                    Elasticsearch                                       Read API
 ```
 
-### File: `src/modules/extractor/extractor.service.ts`
+---
+
+## 2. Extractor Layer
+
+### 2.1 Facade
+
+**File:** `src/modules/overlay-metrics-etl/extractor/extractor.service.ts`
+
+`ExtractorService` là facade, không chứa logic phức tạp — chỉ delegate sang `TrackingEsService`. Tồn tại để dễ thay đổi data source sau này (thêm cache, circuit breaker, v.v.).
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import { TrackingEsService, TrackingAggQuery } from './elasticsearch/tracking-es.service';
-
 @Injectable()
 export class ExtractorService {
   constructor(private readonly trackingEsService: TrackingEsService) {}
@@ -326,366 +62,294 @@ export class ExtractorService {
 }
 ```
 
----
+### 2.2 Elasticsearch Queries
 
-## 2. Transformer Module
+**File:** `src/modules/overlay-metrics-etl/extractor/elasticsearch/tracking-es.service.ts`
 
-### File: `src/modules/transformer/transformer.service.ts`
+`TrackingEsService` chứa 7 query methods tương ứng 7 metric types. Tất cả queries đều dùng ES client v9 syntax (flat, không có `body` wrapper).
+
+**Base query builder:**
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import {
-  PlatformMetricDto,
-  DeviceBreakdownDto,
-  TransportComparisonDto,
-  SdkVersionDto,
-  FailureAnalysisDto,
-  LatencyPercentileDto,
-  TimeseriesPointDto,
-} from './dto';
+private buildBaseQuery(query: TrackingAggQuery): Record<string, unknown> {
+  if (!query.tenantId) {
+    throw new Error('tenantId is required for Elasticsearch queries');
+  }
 
-export interface TransformContext {
-  timelineId: string;
-  matchId: string;
-  tenantId: string;
-  intervalFrom: Date;
-  intervalTo: Date;
+  const must: Record<string, unknown>[] = [
+    { term: { 'labels.tenant_id': query.tenantId } },
+    {
+      term: {
+        'labels.environment': this.configService.get<string>(
+          'app.elasticApmEnvironment',
+          'development',
+        ),
+      },
+    },
+  ];
+
+  if (query.timelineIds?.length) {
+    must.push({ terms: { 'labels.timeline_id': query.timelineIds } });
+  }
+
+  if (query.mediaContentId) {
+    must.push({ term: { 'labels.media_content_id': query.mediaContentId } });
+  }
+
+  const rangeFilter: Record<string, string> = {};
+  if (query.from) rangeFilter.gte = query.from.toISOString();
+  if (query.to) rangeFilter.lt = query.to.toISOString();
+  if (Object.keys(rangeFilter).length > 0) {
+    must.push({ range: { '@timestamp': rangeFilter } });
+  }
+
+  if (query.platform) {
+    must.push({ term: { 'labels.platform': query.platform } });
+  }
+
+  return { bool: { must } };
+}
+```
+
+**Platform metrics query** — `terms` theo `labels.platform`, nested filters cho `sent`/`received`/`rendered`/`failed`:
+
+```typescript
+async queryPlatformMetrics(query: TrackingAggQuery): Promise<TrackingAggResult<PlatformMetricsAggs>> {
+  const esQuery = this.buildBaseQuery(query);
+  const result = await this.esService.search<unknown, PlatformMetricsAggs>({
+    index: this.getIndex(),
+    size: 0,
+    query: esQuery,
+    aggs: {
+      platforms: {
+        terms: { field: 'labels.platform', size: 100, missing: 'unknown' },
+        aggs: {
+          sent: {
+            filter: { term: { 'labels.stage': 'sent' } },
+            aggs: { room_size_sum: { sum: { field: 'numeric_labels.room_size' } } },
+          },
+          received: { filter: { term: { 'labels.stage': 'received' } } },
+          rendered: {
+            filter: { term: { 'labels.stage': 'rendered' } },
+            aggs: { avg_render_ms: { avg: { field: 'numeric_labels.render_duration_ms' } } },
+          },
+          failed: { filter: { term: { 'labels.stage': 'render-failed' } } },
+        },
+      },
+    },
+  }, { requestTimeout: this.getRequestTimeout() });
+
+  return { aggregations: result.aggregations, took: result.took };
+}
+```
+
+**Device breakdown query** — `terms` theo dimension (`browser`/`os`/`deviceClass`), `filters` theo stage:
+
+```typescript
+async queryDeviceBreakdown(query: TrackingAggQuery, dimension: string): Promise<...> {
+  const fieldMap: Record<string, string> = {
+    browser: 'labels.browser',
+    os: 'labels.client_os',
+    deviceClass: 'labels.device_class',
+  };
+  // ... terms + filters aggregation
+}
+```
+
+**Transport comparison query** — `terms` theo `labels.transport_mode`, tính `avg_render_ms` và `p95_render_ms`.
+
+**SDK version query** — `terms` theo `labels.sdk_version`.
+
+**Failures query** — 2-level `terms`: `failure_reason` → `failure_step`.
+
+**Latency query** — `percentiles` và `stats` cho `receive_latency_ms`, `render_duration_ms`, `ack_latency_ms`, cộng thêm `render_duration` percentiles.
+
+**Timeseries query** — `date_histogram` với `fixed_interval`, metric value được map theo `metricMap`:
+
+```typescript
+const metricMap: Record<string, { type: string; field?: string }> = {
+  sent: { type: 'sum', field: 'numeric_labels.room_size' },
+  received: { type: 'count' },
+  rendered: { type: 'count' },
+  failed: { type: 'count' },
+  avgRenderMs: { type: 'avg', field: 'numeric_labels.render_duration_ms' },
+};
+```
+
+### 2.3 Aggregation Types
+
+**File:** `src/modules/overlay-metrics-etl/extractor/elasticsearch/types/tracking-es-aggs.types.ts`
+
+Định nghĩa TypeScript interfaces cho từng aggregation response từ ES (ví dụ: `PlatformMetricsAggs`, `DeviceBreakdownAggs`, `TimeseriesAggs`, ...).
+
+### 2.4 Query DTO
+
+**File:** `src/modules/overlay-metrics-etl/extractor/dto/tracking-agg-query.dto.ts`
+
+```typescript
+export class TrackingAggQuery {
+  @IsOptional() @IsArray() @IsString({ each: true })
+  timelineIds?: string[];
+
+  @IsOptional() @IsString()
+  mediaContentId?: string;
+
+  @IsString() @IsNotEmpty()
+  tenantId!: string;
+
+  @IsOptional() @IsDate() @Type(() => Date)
+  from?: Date;
+
+  @IsOptional() @IsDate() @Type(() => Date)
+  to?: Date;
+
+  @IsOptional() @IsString()
+  platform?: string;
+}
+```
+
+---
+
+## 3. Transformer Layer
+
+**File:** `src/modules/overlay-metrics-etl/transformer/transformer.service.ts`
+
+`TransformerService` chuyển ES aggregation results thành DTOs để persist vào MongoDB. Có 7 transform methods tương ứng, cộng 2 helper private.
+
+### 3.1 Shared Helpers
+
+```typescript
+private normalizeValue(value: number | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.round(value * 100) / 100;
 }
 
-@Injectable()
-export class TransformerService {
-  private normalizeValue(value: number | null | undefined): number {
-    if (typeof value !== 'number' || Number.isNaN(value)) return 0;
-    return Math.round(value * 100) / 100;
-  }
+private calculateRate(numerator: number, denominator: number): number {
+  if (denominator <= 0) return 0;
+  return this.normalizeValue((numerator / denominator) * 100);
+}
+```
 
-  private calculateRate(numerator: number, denominator: number): number {
-    if (denominator <= 0) return 0;
-    return this.normalizeValue((numerator / denominator) * 100);
-  }
+### 3.2 Transform Methods
 
-  transformPlatformMetrics(aggregations: any, ctx: TransformContext): PlatformMetricDto[] {
-    const buckets = aggregations?.platforms?.buckets || [];
-    
-    return buckets.map((bucket: any) => {
-      const sent = this.normalizeValue(bucket?.sent?.room_size_sum?.value);
-      const received = this.normalizeValue(bucket?.received?.doc_count);
-      const rendered = this.normalizeValue(bucket?.rendered?.doc_count);
-      const failed = this.normalizeValue(bucket?.failed?.doc_count);
+| Method | Input Aggregation | Output DTO |
+|--------|------------------|------------|
+| `transformPlatformMetrics` | `PlatformMetricsAggs` | `PlatformMetricDto[]` |
+| `transformDeviceBreakdown` | `DeviceBreakdownAggs` | `DeviceBreakdownDto[]` |
+| `transformTransportComparison` | `TransportComparisonAggs` | `TransportComparisonDto[]` |
+| `transformSdkVersions` | `SdkVersionAggs` | `SdkVersionDto[]` |
+| `transformFailures` | `FailureAggs` | `FailureAnalysisDto[]` |
+| `transformLatency` | `LatencyAggs` | `LatencyPercentileDto` (object, không phải array) |
+| `transformTimeseries` | `TimeseriesAggs` | `TimeseriesPointDto[]` |
 
-      return {
-        timelineId: ctx.timelineId,
-        matchId: ctx.matchId,
-        tenantId: ctx.tenantId,
-        platform: bucket?.key || 'unknown',
-        sent,
-        received,
-        rendered,
-        failed,
-        receiveRate: this.calculateRate(received, sent),
-        renderRate: this.calculateRate(rendered, sent),
-        failureRate: this.calculateRate(failed, received),
-        avgRenderMs: this.normalizeValue(bucket?.rendered?.avg_render_ms?.value),
-        intervalFrom: ctx.intervalFrom,
-        intervalTo: ctx.intervalTo,
-      };
-    });
-  }
+**Ví dụ `transformPlatformMetrics`:**
 
-  transformDeviceBreakdown(
-    aggregations: any,
-    ctx: TransformContext,
-    dimension: string,
-  ): DeviceBreakdownDto[] {
-    const buckets = aggregations?.by_dimension?.buckets || [];
+```typescript
+transformPlatformMetrics(aggregations: PlatformMetricsAggs | undefined, ctx: TransformContext): PlatformMetricDto[] {
+  const buckets = aggregations?.platforms?.buckets ?? [];
 
-    return buckets.map((bucket: any) => {
-      const stageBuckets = bucket?.by_stage?.buckets;
-      const received = this.normalizeValue(stageBuckets?.received?.doc_count);
-      const rendered = this.normalizeValue(stageBuckets?.rendered?.doc_count);
-      const failed = this.normalizeValue(stageBuckets?.failed?.doc_count);
-
-      return {
-        timelineId: ctx.timelineId,
-        matchId: ctx.matchId,
-        tenantId: ctx.tenantId,
-        dimension,
-        bucketKey: bucket?.key || 'unknown',
-        received,
-        rendered,
-        failed,
-        renderRate: this.calculateRate(rendered, received),
-        avgRenderMs: this.normalizeValue(stageBuckets?.rendered?.avg_render_ms?.value),
-        intervalFrom: ctx.intervalFrom,
-        intervalTo: ctx.intervalTo,
-      };
-    });
-  }
-
-  transformTransportComparison(
-    aggregations: any,
-    ctx: TransformContext,
-  ): TransportComparisonDto[] {
-    const buckets = aggregations?.by_transport?.buckets || [];
-
-    return buckets.map((bucket: any) => {
-      const stageBuckets = bucket?.by_stage?.buckets;
-      const received = this.normalizeValue(stageBuckets?.received?.doc_count);
-      const rendered = this.normalizeValue(stageBuckets?.rendered?.doc_count);
-
-      return {
-        timelineId: ctx.timelineId,
-        matchId: ctx.matchId,
-        tenantId: ctx.tenantId,
-        transportMode: bucket?.key || 'unknown',
-        count: received + rendered,
-        renderRate: this.calculateRate(rendered, received),
-        avgRenderMs: this.normalizeValue(stageBuckets?.rendered?.avg_render_ms?.value),
-        p95RenderMs: this.normalizeValue(stageBuckets?.rendered?.p95_render_ms?.values?.['95.0']),
-        intervalFrom: ctx.intervalFrom,
-        intervalTo: ctx.intervalTo,
-      };
-    });
-  }
-
-  transformSdkVersions(aggregations: any, ctx: TransformContext): SdkVersionDto[] {
-    const buckets = aggregations?.by_sdk_version?.buckets || [];
-
-    return buckets.map((bucket: any) => {
-      const stageBuckets = bucket?.by_stage?.buckets;
-      const received = this.normalizeValue(stageBuckets?.received?.doc_count);
-      const rendered = this.normalizeValue(stageBuckets?.rendered?.doc_count);
-
-      return {
-        timelineId: ctx.timelineId,
-        matchId: ctx.matchId,
-        tenantId: ctx.tenantId,
-        sdkVersion: bucket?.key || 'unknown',
-        count: this.normalizeValue(bucket?.doc_count),
-        renderRate: this.calculateRate(rendered, received),
-        avgRenderMs: this.normalizeValue(stageBuckets?.rendered?.avg_render_ms?.value),
-        intervalFrom: ctx.intervalFrom,
-        intervalTo: ctx.intervalTo,
-      };
-    });
-  }
-
-  transformFailures(aggregations: any, ctx: TransformContext): FailureAnalysisDto[] {
-    const reasonBuckets = aggregations?.by_reason?.buckets || [];
-    let totalFailed = 0;
-
-    for (const reasonBucket of reasonBuckets) {
-      const stepBuckets = reasonBucket?.by_step?.buckets || [];
-      for (const stepBucket of stepBuckets) {
-        totalFailed += this.normalizeValue(stepBucket?.doc_count);
-      }
-    }
-
-    const results: FailureAnalysisDto[] = [];
-
-    for (const reasonBucket of reasonBuckets) {
-      const reason = reasonBucket?.key || 'unknown';
-      const stepBuckets = reasonBucket?.by_step?.buckets || [];
-
-      for (const stepBucket of stepBuckets) {
-        const count = this.normalizeValue(stepBucket?.doc_count);
-        results.push({
-          timelineId: ctx.timelineId,
-          matchId: ctx.matchId,
-          tenantId: ctx.tenantId,
-          failureReason: reason,
-          failureStep: stepBucket?.key || 'unknown',
-          count,
-          percentOfFailed: totalFailed > 0 ? this.normalizeValue((count / totalFailed) * 100) : 0,
-          intervalFrom: ctx.intervalFrom,
-          intervalTo: ctx.intervalTo,
-        });
-      }
-    }
-
-    return results;
-  }
-
-  transformLatency(aggregations: any, ctx: TransformContext): LatencyPercentileDto {
-    const mapP = (values: any, stats: any) => ({
-      p50: this.normalizeValue(values?.['50.0']),
-      p75: this.normalizeValue(values?.['75.0']),
-      p95: this.normalizeValue(values?.['95.0']),
-      p99: this.normalizeValue(values?.['99.0']),
-      avg: this.normalizeValue(stats?.avg),
-      max: this.normalizeValue(stats?.max),
-    });
+  return buckets.map((bucket) => {
+    const sent = this.normalizeValue(bucket.sent?.room_size_sum?.value);
+    const received = this.normalizeValue(bucket.received?.doc_count);
+    const rendered = this.normalizeValue(bucket.rendered?.doc_count);
+    const failed = this.normalizeValue(bucket.failed?.doc_count);
 
     return {
       timelineId: ctx.timelineId,
       matchId: ctx.matchId,
       tenantId: ctx.tenantId,
-      receive: mapP(aggregations?.receive_latency?.values, aggregations?.receive_stats),
-      render: mapP(aggregations?.render_latency?.values, aggregations?.render_stats),
-      ack: mapP(aggregations?.ack_latency?.values, aggregations?.ack_stats),
-      renderDuration: {
-        p50: this.normalizeValue(aggregations?.render_duration?.values?.['50.0']),
-        p95: this.normalizeValue(aggregations?.render_duration?.values?.['95.0']),
-        p99: this.normalizeValue(aggregations?.render_duration?.values?.['99.0']),
-        avg: this.normalizeValue(aggregations?.render_stats?.avg),
-      },
+      platform: String(bucket.key || 'unknown'),
+      sent, received, rendered, failed,
+      receiveRate: this.calculateRate(received, sent),
+      renderRate: this.calculateRate(rendered, received),
+      failureRate: this.calculateRate(failed, received),
+      netSuccessRate: this.calculateRate(rendered, sent),
+      avgRenderMs: this.normalizeValue(bucket.rendered?.avg_render_ms?.value),
       intervalFrom: ctx.intervalFrom,
       intervalTo: ctx.intervalTo,
     };
-  }
-
-  transformTimeseries(
-    aggregations: any,
-    ctx: TransformContext,
-    metric: string,
-    interval: string,
-  ): TimeseriesPointDto[] {
-    const buckets = aggregations?.timeseries?.buckets || [];
-
-    return buckets.map((bucket: any) => ({
-      timelineId: ctx.timelineId,
-      matchId: ctx.matchId,
-      tenantId: ctx.tenantId,
-      metric,
-      interval,
-      time: bucket?.key_as_string || new Date(bucket?.key).toISOString(),
-      value: bucket?.metric_value?.doc_count !== undefined
-        ? this.normalizeValue(bucket?.metric_value?.doc_count)
-        : this.normalizeValue(bucket?.metric_value?.value ?? bucket?.doc_count),
-      intervalFrom: ctx.intervalFrom,
-      intervalTo: ctx.intervalTo,
-    }));
-  }
+  });
 }
 ```
 
----
+**Ví dụ `transformLatency`:** Trả về 1 object (không phải array), chứa `receive`, `render`, `ack` (mỗi cái có `p50`/`p75`/`p95`/`p99`/`avg`/`max`), và `renderDuration` (có `p50`/`p95`/`p99`/`avg`).
 
-## 3. Loader Module
-
-### File: `src/modules/loader/loader.service.ts`
+**Ví dụ `transformTimeseries`:**
 
 ```typescript
-import { Injectable, Logger } from '@nestjs/common';
-import {
-  OverlayMetricsPlatform,
-  OverlayMetricsDevice,
-  OverlayMetricsTransport,
-  OverlayMetricsSdk,
-  OverlayMetricsFailure,
-  OverlayMetricsTimeseries,
-  OverlayMetricsLatency,
-} from './schemas';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+transformTimeseries(aggregations: TimeseriesAggs | undefined, ctx: TransformContext, metric: string, interval: string): TimeseriesPointDto[] {
+  const buckets = aggregations?.timeseries?.buckets ?? [];
 
+  return buckets.map((bucket) => ({
+    timelineId: ctx.timelineId,
+    matchId: ctx.matchId,
+    tenantId: ctx.tenantId,
+    metric,
+    interval,
+    time: new Date(bucket.key_as_string ?? bucket.key ?? Date.now()),
+    value: bucket.metric_value?.doc_count !== undefined
+      ? this.normalizeValue(bucket.metric_value.doc_count)
+      : this.normalizeValue(bucket.metric_value?.value ?? 0),
+    intervalFrom: ctx.intervalFrom,
+    intervalTo: ctx.intervalTo,
+  }));
+}
+```
+
+### 3.3 Unit Tests
+
+**File:** `src/modules/overlay-metrics-etl/transformer/transformer.service.spec.ts`
+
+Test suite cover tất cả 7 transform methods, bao gồm edge cases: zero sent, empty aggregations (trả về `[]` hoặc object rỗng), và percentOfFailed calculation.
+
+---
+
+## 4. Loader Layer
+
+**File:** `src/modules/overlay-metrics-etl/loader/loader.service.ts`
+
+`LoaderService` là tầng cuối của ETL pipeline. **Delegate hoàn toàn cho `OverlayMetricsRepository`** — không dùng `@InjectModel` trực tiếp. Mỗi method chỉ gọi `repository.upsert(MetricType.XXX, items)`.
+
+```typescript
 @Injectable()
 export class LoaderService {
   private readonly logger = new Logger(LoaderService.name);
 
-  constructor(
-    @InjectModel(OverlayMetricsPlatform.name)
-    private readonly platformModel: Model<OverlayMetricsPlatform>,
-    @InjectModel(OverlayMetricsDevice.name)
-    private readonly deviceModel: Model<OverlayMetricsDevice>,
-    @InjectModel(OverlayMetricsTransport.name)
-    private readonly transportModel: Model<OverlayMetricsTransport>,
-    @InjectModel(OverlayMetricsSdk.name)
-    private readonly sdkModel: Model<OverlayMetricsSdk>,
-    @InjectModel(OverlayMetricsFailure.name)
-    private readonly failureModel: Model<OverlayMetricsFailure>,
-    @InjectModel(OverlayMetricsTimeseries.name)
-    private readonly timeseriesModel: Model<OverlayMetricsTimeseries>,
-    @InjectModel(OverlayMetricsLatency.name)
-    private readonly latencyModel: Model<OverlayMetricsLatency>,
-  ) {}
+  constructor(private readonly repository: OverlayMetricsRepository) {}
 
-  private buildUpsertOps<T extends { timelineId: string; intervalFrom: Date; [key: string]: any }>(
-    items: T[],
-    uniqueFields: string[],
-  ): any[] {
-    return items.map((item) => {
-      const filter: Record<string, any> = {};
-      for (const field of uniqueFields) {
-        filter[field] = item[field];
-      }
-
-      return {
-        updateOne: {
-          filter,
-          update: { $set: item },
-          upsert: true,
-        },
-      };
-    });
-  }
-
-  async loadPlatformMetrics(items: any[]): Promise<void> {
+  async loadPlatformMetrics(items: PlatformMetricDto[]): Promise<void> {
     if (!items.length) return;
-    const ops = this.buildUpsertOps(items, ['timelineId', 'platform', 'intervalFrom']);
-    await this.platformModel.bulkWrite(ops);
+    await this.repository.upsert(MetricType.PLATFORM, items as unknown as Record<string, unknown>[]);
     this.logger.log(`Upserted ${items.length} platform metrics`);
   }
 
-  async loadDeviceBreakdown(items: any[]): Promise<void> {
+  async loadDeviceBreakdown(items: DeviceBreakdownDto[]): Promise<void> {
     if (!items.length) return;
-    const ops = this.buildUpsertOps(items, ['timelineId', 'dimension', 'bucketKey', 'intervalFrom']);
-    await this.deviceModel.bulkWrite(ops);
+    await this.repository.upsert(MetricType.DEVICE, items as unknown as Record<string, unknown>[]);
     this.logger.log(`Upserted ${items.length} device breakdowns`);
   }
 
-  async loadTransportComparison(items: any[]): Promise<void> {
-    if (!items.length) return;
-    const ops = this.buildUpsertOps(items, ['timelineId', 'transportMode', 'intervalFrom']);
-    await this.transportModel.bulkWrite(ops);
-    this.logger.log(`Upserted ${items.length} transport comparisons`);
-  }
-
-  async loadSdkVersions(items: any[]): Promise<void> {
-    if (!items.length) return;
-    const ops = this.buildUpsertOps(items, ['timelineId', 'sdkVersion', 'intervalFrom']);
-    await this.sdkModel.bulkWrite(ops);
-    this.logger.log(`Upserted ${items.length} SDK versions`);
-  }
-
-  async loadFailures(items: any[]): Promise<void> {
-    if (!items.length) return;
-    const ops = this.buildUpsertOps(items, ['timelineId', 'failureReason', 'failureStep', 'intervalFrom']);
-    await this.failureModel.bulkWrite(ops);
-    this.logger.log(`Upserted ${items.length} failures`);
-  }
-
-  async loadTimeseries(items: any[]): Promise<void> {
-    if (!items.length) return;
-    const ops = this.buildUpsertOps(items, ['timelineId', 'metric', 'interval', 'time']);
-    await this.timeseriesModel.bulkWrite(ops);
-    this.logger.log(`Upserted ${items.length} timeseries points`);
-  }
-
-  async loadLatency(items: any[]): Promise<void> {
-    if (!items.length) return;
-    const ops = this.buildUpsertOps(items, ['timelineId', 'metricType', 'intervalFrom']);
-    await this.latencyModel.bulkWrite(ops);
-    this.logger.log(`Upserted ${items.length} latency records`);
-  }
+  // ... tương tự cho transport, sdk, failures, latency, timeseries
 }
 ```
 
 ---
 
-## 4. Scheduler & Processor
+## 5. Scheduler & Processor
 
-### File: `src/modules/scheduler/scheduler.service.ts`
+### 5.1 Scheduler
+
+**File:** `src/modules/overlay-metrics-etl/scheduler/scheduler.service.ts`
+
+`SchedulerService` implements `OnModuleInit`. Đọc 3 env vars:
+
+- `OVERLAY_METRICS_TENANT_ID`
+- `OVERLAY_METRICS_MATCH_ID`
+- `OVERLAY_METRICS_TIMELINE_IDS` (comma-separated)
+
+Nếu thiếu bất kỳ var nào → log warning và **không đăng ký scheduler**.
 
 ```typescript
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { Queue } from 'bullmq';
-import { InjectQueue } from '@nestjs/bullmq';
-
-export const OVERLAY_METRICS_QUEUE = 'overlay-metrics' as const;
-export const OVERLAY_METRICS_SCHEDULER_ID = 'overlay-metrics-every-5min' as const;
-export const OVERLAY_METRICS_JOB = 'extract-transform-load-metrics' as const;
-
 @Injectable()
 export class SchedulerService implements OnModuleInit {
   private readonly logger = new Logger(SchedulerService.name);
@@ -696,12 +360,25 @@ export class SchedulerService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    const tenantId = process.env.OVERLAY_METRICS_TENANT_ID;
+    const matchId = process.env.OVERLAY_METRICS_MATCH_ID;
+    const timelineIds = process.env.OVERLAY_METRICS_TIMELINE_IDS
+      ? process.env.OVERLAY_METRICS_TIMELINE_IDS.split(',').map((s) => s.trim())
+      : [];
+
+    if (!tenantId || !matchId || timelineIds.length === 0) {
+      this.logger.warn(
+        'Overlay metrics scheduler missing required env vars: OVERLAY_METRICS_TENANT_ID, OVERLAY_METRICS_MATCH_ID, OVERLAY_METRICS_TIMELINE_IDS. Scheduler will not be registered.',
+      );
+      return;
+    }
+
     await this.queue.upsertJobScheduler(
       OVERLAY_METRICS_SCHEDULER_ID,
       { every: 5 * 60 * 1000 }, // 5 minutes
       {
         name: OVERLAY_METRICS_JOB,
-        data: { timeRangeMinutes: 5 },
+        data: { timeRangeMinutes: 5, tenantId, matchId, timelineIds },
         opts: {
           attempts: 3,
           backoff: { type: 'exponential', delay: 5000 },
@@ -714,275 +391,415 @@ export class SchedulerService implements OnModuleInit {
 }
 ```
 
-### File: `src/modules/scheduler/processors/overlay-metrics.processor.ts`
+### 5.2 Processor
+
+**File:** `src/modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor.ts`
+
+`OverlayMetricsProcessor` extends `WorkerHost`. Route job bằng `job.name`. Nếu không phải `OVERLAY_METRICS_JOB` thì log warn và return.
+
+**Job data interface:**
 
 ```typescript
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
-import { ExtractorService } from '@modules/extractor/extractor.service';
-import { TransformerService, TransformContext } from '@modules/transformer/transformer.service';
-import { LoaderService } from '@modules/loader/loader.service';
-import { OVERLAY_METRICS_QUEUE, OVERLAY_METRICS_JOB } from '../scheduler.service';
-
-@Processor(OVERLAY_METRICS_QUEUE)
-export class OverlayMetricsProcessor extends WorkerHost {
-  private readonly logger = new Logger(OverlayMetricsProcessor.name);
-
-  constructor(
-    private readonly extractor: ExtractorService,
-    private readonly transformer: TransformerService,
-    private readonly loader: LoaderService,
-  ) {
-    super();
-  }
-
-  async process(job: Job): Promise<void> {
-    if (job.name !== OVERLAY_METRICS_JOB) {
-      this.logger.warn(`Unknown job name: ${job.name}`);
-      return;
-    }
-
-    this.logger.log(`Processing job ${job.id}`);
-
-    const now = new Date();
-    const from = new Date(now.getTime() - job.data.timeRangeMinutes * 60 * 1000);
-
-    // TODO: Lấy danh sách active timelineIds từ tournament service hoặc cache
-    const timelineIds = job.data.timelineIds || [];
-    const tenantId = job.data.tenantId;
-
-    if (!timelineIds.length || !tenantId) {
-      this.logger.warn('No timelineIds or tenantId provided, skipping');
-      return;
-    }
-
-    const ctx: TransformContext = {
-      timelineId: timelineIds[0], // Nếu nhiều timeline, loop qua từng cái
-      matchId: job.data.matchId,
-      tenantId,
-      intervalFrom: from,
-      intervalTo: now,
-    };
-
-    // 1. Platform Metrics
-    const platformAgg = await this.extractor.extractPlatformMetrics({
-      timelineIds,
-      tenantId,
-      from,
-      to: now,
-    });
-    const platformData = this.transformer.transformPlatformMetrics(platformAgg.aggregations, ctx);
-    await this.loader.loadPlatformMetrics(platformData);
-
-    // 2. Device Breakdown (3 dimensions)
-    for (const dimension of ['browser', 'os', 'deviceClass']) {
-      const deviceAgg = await this.extractor.extractDeviceBreakdown({ timelineIds, tenantId, from, to: now }, dimension);
-      const deviceData = this.transformer.transformDeviceBreakdown(deviceAgg.aggregations, ctx, dimension);
-      await this.loader.loadDeviceBreakdown(deviceData);
-    }
-
-    // 3. Transport Comparison
-    const transportAgg = await this.extractor.extractTransportComparison({ timelineIds, tenantId, from, to: now });
-    const transportData = this.transformer.transformTransportComparison(transportAgg.aggregations, ctx);
-    await this.loader.loadTransportComparison(transportData);
-
-    // 4. SDK Versions
-    const sdkAgg = await this.extractor.extractSdkVersions({ timelineIds, tenantId, from, to: now });
-    const sdkData = this.transformer.transformSdkVersions(sdkAgg.aggregations, ctx);
-    await this.loader.loadSdkVersions(sdkData);
-
-    // 5. Failures
-    const failureAgg = await this.extractor.extractFailures({ timelineIds, tenantId, from, to: now });
-    const failureData = this.transformer.transformFailures(failureAgg.aggregations, ctx);
-    await this.loader.loadFailures(failureData);
-
-    // 6. Latency
-    const latencyAgg = await this.extractor.extractLatency({ timelineIds, tenantId, from, to: now });
-    const latencyData = this.transformer.transformLatency(latencyAgg.aggregations, ctx);
-    await this.loader.loadLatency([latencyData]);
-
-    // 7. Timeseries (multiple metrics)
-    for (const metric of ['sent', 'received', 'rendered', 'failed', 'avgRenderMs']) {
-      const tsAgg = await this.extractor.extractTimeseries({ timelineIds, tenantId, from, to: now }, metric, '5m');
-      const tsData = this.transformer.transformTimeseries(tsAgg.aggregations, ctx, metric, '5m');
-      await this.loader.loadTimeseries(tsData);
-    }
-
-    this.logger.log(`Job ${job.id} completed`);
-  }
+interface OverlayMetricsJobData {
+  timeRangeMinutes: number;
+  timelineIds: string[];
+  tenantId: string;
+  matchId: string;
+  intervalFrom?: string | Date;
+  intervalTo?: string | Date;
 }
 ```
 
----
+**Core methods:**
 
-## 5. Wiring Module
+- `validateJobData(data)` — kiểm tra `timeRangeMinutes` phải là number > 0, `timelineIds` là non-empty array, `tenantId` và `matchId` là non-empty string.
+- `parseOptionalDate(value, field)` — parse string hoặc Date object từ job data.
+- `resolveInterval(data, job, intervalMs)` — **ưu tiên explicit `intervalFrom`/`intervalTo`** từ job data (hỗ trợ backfill). Nếu không có, tính từ `job.timestamp + delay` và round xuống bội số của `intervalMs`.
+- `processTimeline(timelineId, matchId, tenantId, intervalFrom, intervalTo)` — chạy 7 bước ETL cho 1 timeline.
 
-### `src/modules/extractor/extractor.module.ts`
-
-```typescript
-import { Module } from '@nestjs/common';
-import { ExtractorService } from './extractor.service';
-import { TrackingEsService } from './elasticsearch/tracking-es.service';
-
-@Module({
-  providers: [ExtractorService, TrackingEsService],
-  exports: [ExtractorService],
-})
-export class ExtractorModule {}
-```
-
-### `src/modules/transformer/transformer.module.ts`
+**Resolve interval logic:**
 
 ```typescript
-import { Module } from '@nestjs/common';
-import { TransformerService } from './transformer.service';
+private resolveInterval(data: OverlayMetricsJobData, job: Job, intervalMs: number): { intervalFrom: Date; intervalTo: Date } {
+  const explicitFrom = this.parseOptionalDate(data.intervalFrom, 'intervalFrom');
+  const explicitTo = this.parseOptionalDate(data.intervalTo, 'intervalTo');
 
-@Module({
-  providers: [TransformerService],
-  exports: [TransformerService],
-})
-export class TransformerModule {}
+  if (explicitFrom || explicitTo) {
+    if (!explicitFrom || !explicitTo || explicitFrom >= explicitTo) {
+      throw new Error('intervalFrom and intervalTo must both be valid and ordered');
+    }
+    return { intervalFrom: explicitFrom, intervalTo: explicitTo };
+  }
+
+  const scheduledAtMs = job.timestamp + Math.max(job.delay ?? 0, 0);
+  const intervalTo = new Date(Math.floor(scheduledAtMs / intervalMs) * intervalMs);
+  const intervalFrom = new Date(intervalTo.getTime() - intervalMs);
+
+  return { intervalFrom, intervalTo };
+}
 ```
 
-### `src/modules/loader/loader.module.ts`
+**Timeline processing flow** (chạy tuần tự, 1 timeline fail → throw để BullMQ retry):
 
-```typescript
-import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
-import { LoaderService } from './loader.service';
-import {
-  OverlayMetricsPlatform,
-  OverlayMetricsPlatformSchema,
-  OverlayMetricsDevice,
-  OverlayMetricsDeviceSchema,
-  OverlayMetricsTransport,
-  OverlayMetricsTransportSchema,
-  OverlayMetricsSdk,
-  OverlayMetricsSdkSchema,
-  OverlayMetricsFailure,
-  OverlayMetricsFailureSchema,
-  OverlayMetricsTimeseries,
-  OverlayMetricsTimeseriesSchema,
-  OverlayMetricsLatency,
-  OverlayMetricsLatencySchema,
-} from './schemas';
-
-@Module({
-  imports: [
-    MongooseModule.forFeature([
-      { name: OverlayMetricsPlatform.name, schema: OverlayMetricsPlatformSchema },
-      { name: OverlayMetricsDevice.name, schema: OverlayMetricsDeviceSchema },
-      { name: OverlayMetricsTransport.name, schema: OverlayMetricsTransportSchema },
-      { name: OverlayMetricsSdk.name, schema: OverlayMetricsSdkSchema },
-      { name: OverlayMetricsFailure.name, schema: OverlayMetricsFailureSchema },
-      { name: OverlayMetricsTimeseries.name, schema: OverlayMetricsTimeseriesSchema },
-      { name: OverlayMetricsLatency.name, schema: OverlayMetricsLatencySchema },
-    ]),
-  ],
-  providers: [LoaderService],
-  exports: [LoaderService],
-})
-export class LoaderModule {}
-```
-
-### `src/modules/scheduler/scheduler.module.ts`
-
-```typescript
-import { Module } from '@nestjs/common';
-import { BullModule } from '@nestjs/bullmq';
-import { SchedulerService, OVERLAY_METRICS_QUEUE } from './scheduler.service';
-import { OverlayMetricsProcessor } from './processors/overlay-metrics.processor';
-import { ExtractorModule } from '@modules/extractor/extractor.module';
-import { TransformerModule } from '@modules/transformer/transformer.module';
-import { LoaderModule } from '@modules/loader/loader.module';
-
-@Module({
-  imports: [
-    BullModule.registerQueue({ name: OVERLAY_METRICS_QUEUE }),
-    ExtractorModule,
-    TransformerModule,
-    LoaderModule,
-  ],
-  providers: [SchedulerService, OverlayMetricsProcessor],
-})
-export class SchedulerModule {}
-```
+1. `extractPlatformMetrics` → `transformPlatformMetrics` → `loadPlatformMetrics`
+2. Loop 3 dimensions: `browser`, `os`, `deviceClass`
+3. `extractTransportComparison` → `transformTransportComparison` → `loadTransportComparison`
+4. `extractSdkVersions` → `transformSdkVersions` → `loadSdkVersions`
+5. `extractFailures` → `transformFailures` → `loadFailures`
+6. `extractLatency` → `transformLatency` → `loadLatency([latencyData])` *(array với 1 element)*
+7. Loop 5 metrics: `sent`, `received`, `rendered`, `failed`, `avgRenderMs` — mỗi cái với interval `5m`
 
 ---
 
-## 6. Environment Variables
+## 6. Repository Layer
 
-Thêm vào `.env`:
+**File:** `src/infrastructure/persistence/overlay-metrics.repository.ts`
 
-```bash
-# Elasticsearch Tracking
-TRACKING_ES_NODE=http://localhost:9200
-TRACKING_ES_INDEX=tracking-events-*
-TRACKING_ES_USERNAME=
-TRACKING_ES_PASSWORD=
-TRACKING_ES_API_KEY=
-TRACKING_ES_TIMEOUT_MS=10000
-
-# MongoDB (đã có)
-MONGO_URI=mongodb://localhost:27017/data_refinery
-
-# Redis (đã có)
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=
-
-# App
-ELASTIC_APM_ENVIRONMENT=development
-TZ=Asia/Ho_Chi_Minh
-```
-
----
-
-## 7. Migration từ Query ES trực tiếp sang MongoDB
-
-### Bước 1: Backfill data
-
-Chạy one-time job để extract historical data từ ES vào MongoDB:
+`OverlayMetricsRepository` inject 7 Mongoose Models, gom vào `Record<MetricType, Model<any>>`.
 
 ```typescript
-// migration/backfill-overlay-metrics.ts
-const startDate = new Date('2024-01-01');
-const endDate = new Date();
-const intervalMinutes = 5;
+@Injectable()
+export class OverlayMetricsRepository {
+  private readonly models: Record<MetricType, Model<any>>;
 
-for (let d = startDate; d < endDate; d = new Date(d.getTime() + intervalMinutes * 60000)) {
-  await processor.runJob({
-    timelineIds: await getAllTimelineIds(),
-    tenantId: 'default',
-    from: d,
-    to: new Date(d.getTime() + intervalMinutes * 60000),
+  constructor(
+    @InjectModel(OverlayMetricsPlatform.name) platform: Model<OverlayMetricsPlatform>,
+    @InjectModel(OverlayMetricsDevice.name) device: Model<OverlayMetricsDevice>,
+    @InjectModel(OverlayMetricsTransport.name) transport: Model<OverlayMetricsTransport>,
+    @InjectModel(OverlayMetricsSdk.name) sdk: Model<OverlayMetricsSdk>,
+    @InjectModel(OverlayMetricsFailure.name) failure: Model<OverlayMetricsFailure>,
+    @InjectModel(OverlayMetricsTimeseries.name) timeseries: Model<OverlayMetricsTimeseries>,
+    @InjectModel(OverlayMetricsLatency.name) latency: Model<OverlayMetricsLatency>,
+  ) {
+    this.models = {
+      [MetricType.PLATFORM]: platform,
+      [MetricType.DEVICE]: device,
+      [MetricType.TRANSPORT]: transport,
+      [MetricType.SDK]: sdk,
+      [MetricType.FAILURE]: failure,
+      [MetricType.TIMESERIES]: timeseries,
+      [MetricType.LATENCY]: latency,
+    };
+  }
+```
+
+### 6.1 Upsert (Accumulate)
+
+Dùng `bulkWrite(updateOne + upsert)` với:
+
+- `$inc` — accumulate fields từ `INC_FIELDS`
+- `$set` — remaining fields (ghi đè)
+- `$setOnInsert: { createdAt: new Date() }`
+- `$currentDate: { updatedAt: true }`
+
+```typescript
+async upsert(type: MetricType, items: Record<string, unknown>[]): Promise<void> {
+  if (!items.length) return;
+  const model = this.models[type];
+  const ops = this.buildUpsertOps(items, UNIQUE_FIELDS[type], INC_FIELDS[type]);
+  await model.bulkWrite(ops, { ordered: false });
+}
+```
+
+**Upsert operation builder:**
+
+```typescript
+private buildUpsertOps<T extends object>(
+  items: T[],
+  uniqueFields: string[],
+  incFields: string[],
+): AnyBulkWriteOperation<any>[] {
+  return items.map((item) => {
+    const record = item as Record<string, unknown>;
+    const filter: Record<string, unknown> = {};
+
+    for (const field of uniqueFields) {
+      if (record[field] === undefined || record[field] === null) {
+        throw new Error(`Missing unique field "${field}" required for upsert filter`);
+      }
+      filter[field] = record[field];
+    }
+
+    const $inc: Record<string, number> = {};
+    const $set: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(record)) {
+      if (value === undefined) continue;
+      if (incFields.includes(key) && typeof value === 'number') {
+        $inc[key] = value;
+      } else {
+        $set[key] = value;
+      }
+    }
+
+    const update: Record<string, unknown> = {
+      $setOnInsert: { createdAt: new Date() },
+      $currentDate: { updatedAt: true },
+    };
+    if (Object.keys($inc).length > 0) update.$inc = $inc;
+    if (Object.keys($set).length > 0) update.$set = $set;
+
+    return { updateOne: { filter, update, upsert: true } };
   });
 }
 ```
 
-### Bước 2: Dual-read (optional)
+### 6.2 Find (Read API)
 
-Trong giai đoạn transition, backend có thể:
-1. Thử đọc từ MongoDB trước
-2. Nếu không có data (cache miss), fallback sang ES
-3. Log metric "cache hit/miss" để monitor
+```typescript
+async find(type: MetricType, filter: Record<string, unknown>): Promise<any[]> {
+  const model = this.models[type];
+  const sortField = SORT_FIELDS[type];
+  return model.find(filter).sort({ [sortField]: -1 }).lean().exec();
+}
+```
 
-### Bước 3: Cutover
+### 6.3 Metadata
 
-Khi MongoDB đã có đủ data, sửa API backend để:
-- Xóa ES query logic
-- Chỉ đọc từ MongoDB
-- Trả về 404 nếu chưa có data (operator cần đợi vài phút)
+**File:** `src/infrastructure/persistence/metric-meta.ts`
+
+Định nghĩa 3 lookup tables:
+
+- `UNIQUE_FIELDS` — composite key cho upsert filter (tất cả dựa trên `matchId` để accumulate từ nhiều timelines)
+- `INC_FIELDS` — fields cần accumulate (`sent`, `received`, `rendered`, `failed`, `count`, `value`). `LATENCY` có array rỗng vì không thể cộng dồn percentiles.
+- `SORT_FIELDS` — default sort field cho query (`time` cho timeseries, `intervalFrom` cho các loại khác).
 
 ---
 
-## 8. Monitoring & Alerting
+## 7. Read API
 
-| Metric | Cách đo | Alert nếu |
-|--------|---------|-----------|
-| ETL latency | `intervalTo - processedAt` trong MongoDB | > 10 phút |
-| ES query time | `took` field trong response | > 5 giây |
-| Documents processed per job | Log hoặc MongoDB count | = 0 (không có data mới) |
-| MongoDB bulkWrite errors | Catch exception | > 0 |
-| API response time | Backend APM | > 100ms (p95) |
+### 7.1 Controller
+
+**File:** `src/modules/overlay-metrics-api/metrics-api.controller.ts`
+
+`@Controller('metrics')`, `@UseGuards(InternalApiGuard)`, có 7 GET endpoints:
+
+```typescript
+@UseGuards(InternalApiGuard)
+@Controller('metrics')
+export class MetricsApiController {
+  constructor(private readonly metricsApiService: MetricsApiService) {}
+
+  @Get('platform')
+  async getPlatform(@Headers('x-tenant-id') tenantId: string, @Query() query: MetricsQueryDto) { ... }
+
+  @Get('device')
+  async getDevice(@Headers('x-tenant-id') tenantId: string, @Query() query: MetricsQueryDto) { ... }
+
+  @Get('transport')
+  async getTransport(@Headers('x-tenant-id') tenantId: string, @Query() query: MetricsQueryDto) { ... }
+
+  @Get('sdk')
+  async getSdk(@Headers('x-tenant-id') tenantId: string, @Query() query: MetricsQueryDto) { ... }
+
+  @Get('failures')
+  async getFailures(@Headers('x-tenant-id') tenantId: string, @Query() query: MetricsQueryDto) { ... }
+
+  @Get('latency')
+  async getLatency(@Headers('x-tenant-id') tenantId: string, @Query() query: MetricsQueryDto) { ... }
+
+  @Get('timeseries')
+  async getTimeseries(
+    @Headers('x-tenant-id') tenantId: string,
+    @Query() query: MetricsQueryDto,
+    @Query('metric') metric?: string,
+  ) { ... }
+}
+```
+
+Tất cả endpoints đều yêu cầu header `x-tenant-id` và `x-internal-api-key`.
+
+### 7.2 Service
+
+**File:** `src/modules/overlay-metrics-api/metrics-api.service.ts`
+
+`MetricsApiService` có `buildFilter()` helper (standalone function) và delegate `repository.find()`:
+
+```typescript
+function buildFilter(tenantId: string, query: MetricsQueryDto): Record<string, any> {
+  const filter: Record<string, any> = { tenantId };
+
+  if (query.matchId) filter.matchId = query.matchId;
+
+  if (query.timelineIds && query.timelineIds.length > 0) {
+    filter.timelineId = { $in: query.timelineIds };
+  }
+
+  if (query.from || query.to) {
+    filter.intervalFrom = {};
+    if (query.from) filter.intervalFrom.$gte = new Date(query.from);
+    if (query.to) filter.intervalFrom.$lte = new Date(query.to);
+  }
+
+  return filter;
+}
+```
+
+`getTimeseries` có thêm param `metric` để filter theo metric name:
+
+```typescript
+async getTimeseries(tenantId: string, query: MetricsQueryDto, metric?: string) {
+  const filter = buildFilter(tenantId, query);
+  if (metric) filter.metric = metric;
+  return this.repository.find(MetricType.TIMESERIES, filter);
+}
+```
+
+### 7.3 Query DTO
+
+**File:** `src/modules/overlay-metrics-api/dto/metrics-query.dto.ts`
+
+```typescript
+export class MetricsQueryDto {
+  @ApiPropertyOptional({ description: 'Match ID', example: '000000000000000000000000' })
+  @IsOptional() @IsString()
+  matchId?: string;
+
+  @ApiPropertyOptional({ description: 'Timeline ID(s)', example: ['timeline-001'], isArray: true })
+  @IsOptional() @IsString({ each: true })
+  @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
+  timelineIds?: string[];
+
+  @ApiPropertyOptional({ description: 'Start date (ISO 8601)', example: '2024-01-01T00:00:00Z' })
+  @IsOptional() @IsDateString()
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'End date (ISO 8601)', example: '2024-01-02T00:00:00Z' })
+  @IsOptional() @IsDateString()
+  to?: string;
+}
+```
+
+### 7.4 Auth Guard
+
+**File:** `src/common/guards/internal-api.guard.ts`
+
+```typescript
+@Injectable()
+export class InternalApiGuard implements CanActivate {
+  private readonly apiKey = process.env.INTERNAL_API_KEY;
+
+  canActivate(context: ExecutionContext): boolean {
+    const request = context.switchToHttp().getRequest();
+    const headerKey = request.headers['x-internal-api-key'];
+
+    if (!this.apiKey) {
+      throw new UnauthorizedException('INTERNAL_API_KEY not configured');
+    }
+
+    if (!headerKey || headerKey !== this.apiKey) {
+      throw new UnauthorizedException('Invalid or missing internal API key');
+    }
+
+    return true;
+  }
+}
+```
+
+---
+
+## 8. Constants & Configuration
+
+**File:** `src/common/constants/scheduler.constants.ts`
+
+```typescript
+export const OVERLAY_METRICS_QUEUE = 'overlay-metrics' as const;
+export const OVERLAY_METRICS_SCHEDULER_ID = 'overlay-metrics-every-5min' as const;
+export const OVERLAY_METRICS_JOB = 'extract-transform-load-metrics' as const;
+```
+
+---
+
+## 9. DTOs, Schemas & Shared Interfaces
+
+### 9.1 DTOs (barrel)
+
+**File:** `src/domain/dto/index.ts`
+
+Export từ 7 files:
+- `platform-metric.dto.ts`
+- `device-breakdown.dto.ts`
+- `transport-comparison.dto.ts`
+- `sdk-version.dto.ts`
+- `failure-analysis.dto.ts`
+- `latency-percentile.dto.ts`
+- `timeseries-point.dto.ts`
+
+### 9.2 Schemas (barrel)
+
+**File:** `src/domain/schemas/index.ts`
+
+Export từ 7 files:
+- `overlay-metrics-platform.schema.ts`
+- `overlay-metrics-device.schema.ts`
+- `overlay-metrics-transport.schema.ts`
+- `overlay-metrics-sdk.schema.ts`
+- `overlay-metrics-failure.schema.ts`
+- `overlay-metrics-timeseries.schema.ts`
+- `overlay-metrics-latency.schema.ts`
+
+### 9.3 TransformContext
+
+**File:** `src/common/interfaces/transform-context.interface.ts`
+
+```typescript
+export interface TransformContext {
+  timelineId: string;
+  matchId: string;
+  tenantId: string;
+  intervalFrom: Date;
+  intervalTo: Date;
+}
+```
+
+### 9.4 MetricType Enum
+
+**File:** `src/domain/enums/metric-type.enum.ts`
+
+```typescript
+export enum MetricType {
+  PLATFORM = 'platform',
+  DEVICE = 'device',
+  TRANSPORT = 'transport',
+  SDK = 'sdk',
+  FAILURE = 'failure',
+  TIMESERIES = 'timeseries',
+  LATENCY = 'latency',
+}
+```
+
+---
+
+## 10. Error Handling & Retry
+
+- Processor throw error nếu 1 timeline fail → BullMQ retry theo config (`attempts: 3`, `backoff: exponential 5s`).
+- ES query timeout lấy từ config `elasticsearch.trackingTimeoutMs`, default 10s.
+- Scheduler không đăng ký nếu thiếu env vars — không crash app.
+- `normalizeValue` đảm bảo không có `NaN`/`Infinity` lọt vào MongoDB.
+
+---
+
+## File Index (Quick Reference)
+
+| Component | Path |
+|-----------|------|
+| Extractor Facade | `src/modules/overlay-metrics-etl/extractor/extractor.service.ts` |
+| ES Queries | `src/modules/overlay-metrics-etl/extractor/elasticsearch/tracking-es.service.ts` |
+| ES Agg Types | `src/modules/overlay-metrics-etl/extractor/elasticsearch/types/tracking-es-aggs.types.ts` |
+| Extractor DTO | `src/modules/overlay-metrics-etl/extractor/dto/tracking-agg-query.dto.ts` |
+| Transformer | `src/modules/overlay-metrics-etl/transformer/transformer.service.ts` |
+| Transformer Tests | `src/modules/overlay-metrics-etl/transformer/transformer.service.spec.ts` |
+| Loader | `src/modules/overlay-metrics-etl/loader/loader.service.ts` |
+| Scheduler | `src/modules/overlay-metrics-etl/scheduler/scheduler.service.ts` |
+| Processor | `src/modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor.ts` |
+| Repository | `src/infrastructure/persistence/overlay-metrics.repository.ts` |
+| Repository Meta | `src/infrastructure/persistence/metric-meta.ts` |
+| API Controller | `src/modules/overlay-metrics-api/metrics-api.controller.ts` |
+| API Service | `src/modules/overlay-metrics-api/metrics-api.service.ts` |
+| API Query DTO | `src/modules/overlay-metrics-api/dto/metrics-query.dto.ts` |
+| Auth Guard | `src/common/guards/internal-api.guard.ts` |
+| Constants | `src/common/constants/scheduler.constants.ts` |
+| Domain DTOs | `src/domain/dto/index.ts` |
+| Domain Schemas | `src/domain/schemas/index.ts` |
+| MetricType Enum | `src/domain/enums/metric-type.enum.ts` |
+| TransformContext | `src/common/interfaces/transform-context.interface.ts` |

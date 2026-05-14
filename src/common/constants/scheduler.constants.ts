@@ -1,3 +1,4 @@
-export const DATA_REFINERY_QUEUE = 'data-refinery' as const;
-export const APM_EXTRACT_SCHEDULER_ID = 'apm-extract-every-5min' as const;
-export const EXTRACT_TRANSFORM_LOAD_JOB = 'extract-transform-load' as const;
+export const OVERLAY_METRICS_QUEUE = 'overlay-metrics' as const;
+export const OVERLAY_METRICS_SCHEDULER_ID =
+  'overlay-metrics-every-5min' as const;
+export const OVERLAY_METRICS_JOB = 'extract-transform-load-metrics' as const;

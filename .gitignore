@@ -47,3 +47,12 @@ temp/
 
 # agents
 .pi/
+.claude/
+
+# AI Agent artifacts (reviews, plans, worker contexts)
+review/
+plan.md
+progress.md
+reviewer-*.md
+worker-*.md
+

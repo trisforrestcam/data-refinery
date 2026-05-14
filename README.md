@@ -1,73 +1,228 @@
 # DataRefinery
 
-ETL pipeline nhỏ gọn chạy trên NestJS: pull APM traces từ Elasticsearch, transform & refine, rồi persist vào MongoDB qua cron job (BullMQ).
+ETL pipeline NestJS pre-aggregate tracking events từ Elasticsearch (`tracking-events-*`) vào 7 MongoDB collections, phục vụ metrics **"Chỉ số bản overlay"**. Đồng thờ cung cấp Read API để `interactive-backend_v2` (và các internal services khác) query từ MongoDB thay vì động ES trực tiếp.
 
-## Kiến trúc tổng quan
+## Tech Stack
 
+| Thành phần | Phiên bản / Package |
+|---|---|
+| Framework | NestJS 11 |
+| Task Queue | BullMQ 5 (`upsertJobScheduler`) |
+| Database | MongoDB + Mongoose 9 |
+| Search | Elasticsearch 9 (`@elastic/elasticsearch`) |
+| ES Integration | `@nestjs/elasticsearch` (global module) |
+| Queue Backend | Redis (ioredis) |
+| Validation | class-validator 0.15+, class-transformer 0.5+ |
+| Language | TypeScript 5.7+ |
+| Testing | Jest 30 |
+| Linting | ESLint 9 + Prettier 3 |
+
+## Architecture
+
+### ETL Pipeline (mỗi 5 phút)
 ```
-Scheduler (BullMQ cron) → Processor → Extractor (ES) → Transformer → Loader (MongoDB)
-```
-
-| Module | Vai trò |
-|--------|---------|
-| `extractor` | Query `traces-apm-*` từ Elasticsearch |
-| `transformer` | Map raw ECS fields → `RefinedDataDto` |
-| `loader` | Bulk write vào MongoDB qua repository pattern |
-| `scheduler` | Đăng ký cron job 5 phút/lần bằng `upsertJobScheduler` |
-
-## Yêu cầu hệ thống
-
-- Node.js 20+
-- MongoDB (local hoặc Docker)
-- Redis (local hoặc Docker — dùng cho BullMQ)
-- Elasticsearch với APM indices (`traces-apm-*`)
-
-## Cài đặt
-
-```bash
-# 1. Copy env
-cp .env.example .env
-
-# 2. Cài dependencies
-npm install
-
-# 3. Chạy dev mode (watch)
-npm run start:dev
+Scheduler (BullMQ)
+  → Processor (WorkerHost)
+    → Extractor (ES aggregations)
+      → Transformer (DTOs + derived metrics)
+        → Loader → Repository → MongoDB
 ```
 
-## Scripts hữu ích
-
-```bash
-npm run typecheck      # Kiểm tra TypeScript không emit
-npm run test           # Unit tests (Jest)
-npm run test:watch     # Watch mode cho tests
-npm run test:cov       # Coverage report
-npm run test:e2e       # End-to-end tests
+### Read API (on-demand)
+```
+interactive-backend_v2  ──HTTP──▶  Metrics API
+                                     │
+                                     ▼
+                              InternalApiGuard (x-internal-api-key)
+                                     │
+                                     ▼
+                              Repository → MongoDB
 ```
 
-## Cấu trúc thư mục
+## Project Structure
 
 ```
 src/
-├── config/              # Env configs (registerAs pattern)
+├── main.ts                          # Bootstrap, Swagger, global ValidationPipe
+├── app.module.ts                    # Wire up Config, Mongoose, Bull, ES, ETL, API
+├── config/                          # registerAs configs
 ├── common/
-│   ├── constants/       # Queue names, scheduler IDs
-│   └── repositories/    # BaseRepository<T> generic
+│   ├── constants/                   # BullMQ queue/job constants
+│   ├── guards/
+│   │   └── internal-api.guard.ts   # Server-to-server auth
+│   ├── interfaces/
+│   │   └── transform-context.interface.ts
+│   └── modules/
+│       └── elasticsearch-core.module.ts
+├── domain/                          # Shared contracts (không phụ thuộc framework)
+│   ├── enums/
+│   │   └── metric-type.enum.ts
+│   ├── schemas/                     # 7 MongoDB schemas + barrel
+│   └── dto/                         # 7 metric DTOs + barrel
+├── infrastructure/
+│   └── persistence/
+│       ├── persistence.module.ts    # MongooseModule.forFeature
+│       ├── metric-meta.ts           # Unique fields + sort config per metric
+│       └── overlay-metrics.repository.ts  # Repository pattern: upsert + find
 └── modules/
-    ├── extractor/       # ES query + DTOs
-    ├── transformer/     # ECS field mapping
-    ├── loader/          # MongoDB schema + repository + bulkWrite
-    └── scheduler/       # BullMQ queue + processor
+    ├── overlay-metrics-etl/         # Domain feature: ETL pipeline
+    │   ├── etl.module.ts
+    │   ├── extractor/
+    │   ├── transformer/
+    │   ├── loader/
+    │   └── scheduler/
+    └── overlay-metrics-api/         # Domain feature: Read API
+        ├── api.module.ts
+        ├── metrics.controller.ts    # GET /metrics/* (Swagger + InternalApiGuard)
+        ├── metrics.service.ts
+        └── dto/
+            └── metrics-query.dto.ts
 ```
 
-## Convention quan trọng
+## 7 Bước ETL
 
-1. **Config:** Luôn dùng `registerAs` + `forRootAsync` — không hardcode credentials.
-2. **BullMQ:** Dùng `upsertJobScheduler` (thay vì repeatable jobs cũ). Processor extends `WorkerHost`.
-3. **MongoDB:** Persistence qua repository extends `BaseRepository<T>`. Schema dùng `@Schema()` + `@Prop()`.
-4. **ES Client v9:** Query params truyền flat (không dùng `body` wrapper).
-5. **Validation:** DTOs input dùng `class-validator`. `ValidationPipe` được bật global trong `main.ts`.
+| Bước | Metric | ES Aggregation | Transform | MongoDB Collection |
+|---|---|---|---|---|
+| 1 | Platform Metrics | `terms` platform + sub-aggs | `PlatformMetricDto` | `overlay_metrics_platform` |
+| 2 | Device Breakdown | `terms` dimension (browser/os/deviceClass) | `DeviceBreakdownDto` × 3 | `overlay_metrics_device` |
+| 3 | Transport Comparison | `terms` transport_mode | `TransportComparisonDto` | `overlay_metrics_transport` |
+| 4 | SDK Versions | `terms` sdk_version | `SdkVersionDto` | `overlay_metrics_sdk` |
+| 5 | Failures | `terms` failure_reason → failure_step | `FailureAnalysisDto` | `overlay_metrics_failure` |
+| 6 | Latency | percentiles + stats | `LatencyPercentileDto` | `overlay_metrics_latency` |
+| 7 | Timeseries | `date_histogram` 5m | `TimeseriesPointDto` × 5 | `overlay_metrics_timeseries` |
 
-## Mở rộng
+## Environment Variables
 
-Xem `AGENTS.md` hoặc `TODO` trong code để biết các tính năng đang chờ implement (health checks, DLQ, monitoring, v.v.).
+```env
+# App
+NODE_ENV=development
+PORT=5001
+
+# Redis (BullMQ)
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+
+# MongoDB
+MONGODB_URI=mongodb://localhost:27017/datarefinery
+
+# Elasticsearch
+ELASTICSEARCH_NODE=http://localhost:9200
+ELASTICSEARCH_USERNAME=
+ELASTICSEARCH_PASSWORD=
+TRACKING_ES_INDEX=tracking-events-*
+TRACKING_ES_TIMEOUT_MS=10000
+
+# Scheduler targets (built-in scheduler)
+OVERLAY_METRICS_TENANT_ID=tenant-001
+OVERLAY_METRICS_MATCH_ID=000000000000000000000000
+OVERLAY_METRICS_TIMELINE_IDS=timeline-001,timeline-002
+
+# Server-to-server auth
+INTERNAL_API_KEY=change-me-in-production
+
+# App context
+ELASTIC_APM_ENVIRONMENT=development
+TZ=Asia/Ho_Chi_Minh
+```
+
+## Conventions
+
+- **Config:** `registerAs` + `forRootAsync`, không hardcode credentials.
+- **BullMQ:** `upsertJobScheduler`; processor extends `WorkerHost`.
+- **Domain Layer:** Schemas + DTOs + enums ở `domain/`, dùng chung bởi ETL và API.
+- **Repository Pattern:** `OverlayMetricsRepository` centralize persistence. Loader và API đều delegate.
+- **Elasticsearch:** Query flat (không `body` wrapper vì ES client v9).
+- **DTOs:** Barrel export qua `index.ts`.
+- **Bulk Operations:** `bulkWrite(updateOne + upsert)` cho idempotency.
+- **Validation:** Global `ValidationPipe` — `whitelist`, `forbidNonWhitelisted`, `transform`.
+- **Auth:** `InternalApiGuard` kiểm tra `x-internal-api-key` header cho server-to-server calls.
+- **Error Handling:** Log + throw để BullMQ retry.
+
+## Scripts
+
+```bash
+npm run build        # Build production
+npm run typecheck    # TypeScript --noEmit
+npm run start:dev    # Dev mode với watch
+npm run test         # Unit tests (Jest)
+npm run test:cov     # Coverage
+npm run test:e2e     # E2E tests
+npm run lint         # ESLint + fix
+npm run format       # Prettier
+```
+
+## Docker
+
+```bash
+docker build -t data-refinery:latest .
+docker compose up -d
+```
+
+| Property | Value |
+|----------|-------|
+| Base image | `node:20-alpine` |
+| Stages | 2 (builder + production) |
+| User | Non-root (`appuser`) |
+| Exposed port | 5001 |
+| Healthcheck | `wget http://localhost:5001/` mỗi 30s |
+
+## Swagger
+
+```
+http://localhost:5001/api/docs
+```
+
+Authorize với:
+- `x-tenant-id`: `tenant-001`
+- `x-internal-api-key`: token từ `INTERNAL_API_KEY`
+
+## Server-to-Server Call
+
+Từ `interactive-backend_v2`:
+
+```typescript
+const { data } = await this.httpService
+  .get('http://data-refinery:5001/metrics/platform', {
+    headers: {
+      'x-tenant-id': tenantId,
+      'x-internal-api-key': process.env.DATA_REFINERY_API_KEY,
+    },
+    params: { matchId, timelineIds: [timelineId] },
+  })
+  .toPromise();
+```
+
+## Documentation
+
+- [Architecture Detail](docs/ARCHITECTURE.md) — ETL flow, ES queries, MongoDB indexes
+- [BUGS.md](BUGS.md) — Known issues
+- [docs/](docs/) — Full documentation folder
+
+## ES Tracking Document Structure
+
+```json
+{
+  "labels": {
+    "timeline_id": "...",
+    "tenant_id": "...",
+    "environment": "development",
+    "stage": "sent|received|rendered|render-failed",
+    "platform": "android|ios|web",
+    "browser": "...",
+    "client_os": "...",
+    "device_class": "...",
+    "transport_mode": "wsInteractive|longPolling",
+    "sdk_version": "v2.1.0",
+    "failure_reason": "...",
+    "failure_step": "..."
+  },
+  "numeric_labels": {
+    "room_size": 1000,
+    "render_duration_ms": 125.5,
+    "receive_latency_ms": 20,
+    "ack_latency_ms": 5
+  },
+  "@timestamp": "2024-01-15T10:00:01Z"
+}
+```
