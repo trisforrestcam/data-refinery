@@ -8,7 +8,7 @@ import {
   LatencyPercentileDto,
   TimeseriesPointDto,
 } from '@domain/dto';
-import { TransformContext } from '@common/interfaces/transform-context.interface';
+import { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transform-context.interface';
 import {
   PlatformMetricsAggs,
   DeviceBreakdownAggs,
@@ -30,25 +30,6 @@ export type { TransformContext };
  */
 @Injectable()
 export class TransformerService {
-  /**
-   * Chuẩn hóa giá trị từ ES: null/undefined → 0, làm tròn 2 chữ số thập phân.
-   * Tránh NaN hoặc Infinity lọt vào MongoDB gây lỗi schema validation.
-   */
-  private normalizeValue(value: number | null | undefined): number {
-    if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
-    return Math.round(value * 100) / 100;
-  }
-
-  /**
-   * Tính tỷ lệ phần trăm và chuẩn hóa.
-   * Dùng cho receiveRate, renderRate, failureRate, netSuccessRate.
-   * Tránh chia cho 0 — nếu denominator <= 0 thì trả về 0%.
-   */
-  private calculateRate(numerator: number, denominator: number): number {
-    if (denominator <= 0) return 0;
-    return this.normalizeValue((numerator / denominator) * 100);
-  }
-
   /**
    * Transform platform metrics từ ES aggregation.
    * Tính sent (sum room_size), received/rendered/failed (doc_count),
@@ -313,5 +294,24 @@ export class TransformerService {
       intervalFrom: ctx.intervalFrom,
       intervalTo: ctx.intervalTo,
     }));
+  }
+
+  /**
+   * Chuẩn hóa giá trị từ ES: null/undefined → 0, làm tròn 2 chữ số thập phân.
+   * Tránh NaN hoặc Infinity lọt vào MongoDB gây lỗi schema validation.
+   */
+  private normalizeValue(value: number | null | undefined): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+    return Math.round(value * 100) / 100;
+  }
+
+  /**
+   * Tính tỷ lệ phần trăm và chuẩn hóa.
+   * Dùng cho receiveRate, renderRate, failureRate, netSuccessRate.
+   * Tránh chia cho 0 — nếu denominator <= 0 thì trả về 0%.
+   */
+  private calculateRate(numerator: number, denominator: number): number {
+    if (denominator <= 0) return 0;
+    return this.normalizeValue((numerator / denominator) * 100);
   }
 }

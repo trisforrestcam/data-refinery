@@ -17,7 +17,7 @@ import {
 } from '../../src/domain/schemas';
 import { OverlayMetricsProcessor } from '../../src/modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
 import { OVERLAY_METRICS_JOB } from '../../src/common/constants/scheduler.constants';
-import { TransformContext } from '../../src/common/interfaces/transform-context.interface';
+import { TransformContext } from '../../src/modules/overlay-metrics-etl/interfaces/transform-context.interface';
 import { LatencyPercentileDto } from '../../src/domain/dto/latency-percentile.dto';
 
 type MockModel = { bulkWrite: jest.Mock };

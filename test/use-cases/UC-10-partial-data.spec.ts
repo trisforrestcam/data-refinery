@@ -15,7 +15,7 @@ import type {
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
 import { OverlayMetricsProcessor } from '@modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
-import type { TransformContext } from '@common/interfaces/transform-context.interface';
+import type { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transform-context.interface';
 import { OVERLAY_METRICS_JOB } from '@common/constants/scheduler.constants';
 
 type TrackingEsMock = Record<

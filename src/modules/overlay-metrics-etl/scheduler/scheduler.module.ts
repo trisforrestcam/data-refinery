@@ -11,7 +11,7 @@ import { LoaderModule } from '@modules/overlay-metrics-etl/loader/loader.module'
 import {
   SchedulerTarget,
   SchedulerTargetSchema,
-} from './schemas/scheduler-target.schema';
+} from '@domain/schemas/scheduler-target.schema';
 
 @Module({
   imports: [

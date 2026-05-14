@@ -5,7 +5,7 @@ import { TrackingAggQuery } from '@modules/overlay-metrics-etl/extractor/dto/tra
 import { TrackingEsService } from '@modules/overlay-metrics-etl/extractor/elasticsearch/tracking-es.service';
 import { FailureAggs } from '@modules/overlay-metrics-etl/extractor/elasticsearch/types/tracking-es-aggs.types';
 import { FailureAnalysisDto } from '@domain/dto/failure-analysis.dto';
-import { TransformContext } from '@common/interfaces/transform-context.interface';
+import { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transform-context.interface';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
 
 describe('UC-06: Phân tích failure theo nested reason → step', () => {

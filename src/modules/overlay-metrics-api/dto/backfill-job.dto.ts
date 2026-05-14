@@ -8,11 +8,11 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class BackfillJobDto {
   @ApiProperty({ description: 'Tenant ID', example: 'tenant-001' })
   @IsString()
-  tenantId: string;
+  tenantId!: string;
 
   @ApiProperty({ description: 'Match ID cần tính lại', example: '000000000000000000000000' })
   @IsString()
-  matchId: string;
+  matchId!: string;
 
   @ApiProperty({
     description: 'Danh sách timeline IDs cần tính lại',
@@ -21,7 +21,7 @@ export class BackfillJobDto {
   })
   @IsArray()
   @IsString({ each: true })
-  timelineIds: string[];
+  timelineIds!: string[];
 
   @ApiPropertyOptional({
     description: 'Thờ điểm bắt đầu (ISO 8601). Nếu không có, tính từ hiện tại - timeRangeMinutes',

@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { SchedulerTarget } from '@domain/schemas/scheduler-target.schema';
 
 /**
  * Interface định nghĩa cấu hình scheduler cho một match đang live.
  */
-export interface SchedulerTarget {
+export interface SchedulerTargetConfig {
   tenantId: string;
   matchId: string;
   timelineIds: string[];
@@ -22,15 +23,15 @@ export class SchedulerConfigService {
   private readonly logger = new Logger(SchedulerConfigService.name);
 
   constructor(
-    @InjectModel('SchedulerTarget')
-    private readonly targetModel: Model<any>,
+    @InjectModel(SchedulerTarget.name)
+    private readonly targetModel: Model<SchedulerTarget>,
   ) {}
 
   /**
    * Lấy danh sách targets đang active từ DB.
    * Nếu DB chưa có data, fallback về env vars.
    */
-  async getActiveTargets(): Promise<SchedulerTarget[]> {
+  async getActiveTargets(): Promise<SchedulerTargetConfig[]> {
     try {
       const dbTargets = await this.targetModel
         .find({ enabled: true })
@@ -68,7 +69,7 @@ export class SchedulerConfigService {
   /**
    * Thêm hoặc cập nhật target trong DB.
    */
-  async upsertTarget(target: Omit<SchedulerTarget, 'enabled'> & { enabled?: boolean }): Promise<void> {
+  async upsertTarget(target: Omit<SchedulerTargetConfig, 'enabled'> & { enabled?: boolean }): Promise<void> {
     await this.targetModel.updateOne(
       { matchId: target.matchId, tenantId: target.tenantId },
       {

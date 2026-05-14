@@ -6,7 +6,7 @@ import { TrackingEsService } from '@modules/overlay-metrics-etl/extractor/elasti
 import { TransportComparisonAggs } from '@modules/overlay-metrics-etl/extractor/elasticsearch/types/tracking-es-aggs.types';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
 import { TransportComparisonDto } from '@domain/dto/transport-comparison.dto';
-import { TransformContext } from '@common/interfaces/transform-context.interface';
+import { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transform-context.interface';
 
 describe('UC-04: Phân tích transport mode với p95 render latency', () => {
   let moduleRef: TestingModule;

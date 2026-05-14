@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { BullModule } from '@nestjs/bullmq';
 import { ElasticsearchCoreModule } from '@common/modules/elasticsearch-core.module';
+import { TenantCacheModule } from '@common/modules/tenant-cache/tenant-cache.module';
 import appConfig from '@config/app.config';
 import mongoConfig from '@config/mongo.config';
 import redisConfig from '@config/redis.config';
@@ -18,9 +19,13 @@ import { ApiModule } from '@modules/overlay-metrics-api/api.module';
     }),
     MongooseModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        uri: configService.get<string>('mongo.uri'),
-      }),
+      useFactory: (configService: ConfigService) => {
+        const env = configService.get<string>('app.env') || 'development';
+        return {
+          uri: configService.get<string>('mongo.uri'),
+          ...(env !== 'production' && { debug: true }),
+        };
+      },
     }),
     BullModule.forRootAsync({
       inject: [ConfigService],
@@ -33,6 +38,7 @@ import { ApiModule } from '@modules/overlay-metrics-api/api.module';
       }),
     }),
     ElasticsearchCoreModule,
+    TenantCacheModule,
     EtlModule,
     ApiModule,
   ],

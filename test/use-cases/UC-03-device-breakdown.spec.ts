@@ -7,7 +7,7 @@ import { TrackingAggQuery } from '@modules/overlay-metrics-etl/extractor/dto/tra
 import { TrackingEsService } from '@modules/overlay-metrics-etl/extractor/elasticsearch/tracking-es.service';
 import { DeviceBreakdownAggs } from '@modules/overlay-metrics-etl/extractor/elasticsearch/types/tracking-es-aggs.types';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
-import { TransformContext } from '@common/interfaces/transform-context.interface';
+import { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transform-context.interface';
 import { DeviceBreakdownDto } from '@domain/dto/device-breakdown.dto';
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
 import { OverlayMetricsRepository } from '@infrastructure/persistence/overlay-metrics.repository';

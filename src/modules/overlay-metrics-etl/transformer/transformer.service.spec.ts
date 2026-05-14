@@ -1,5 +1,5 @@
 import { TransformerService } from './transformer.service';
-import { TransformContext } from '@common/interfaces/transform-context.interface';
+import { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transform-context.interface';
 
 describe('TransformerService', () => {
   let service: TransformerService;

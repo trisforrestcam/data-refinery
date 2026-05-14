@@ -41,83 +41,6 @@ export class TrackingEsService {
     private readonly configService: ConfigService,
   ) {}
 
-  /** Lấy index pattern tracking từ config (mặc định `tracking-events-*`). */
-  private getIndex(): string {
-    return (
-      this.configService.get<string>('elasticsearch.trackingIndex') ||
-      'tracking-events-*'
-    );
-  }
-
-  /** Lấy request timeout từ config (mặc định 10_000 ms). */
-  private getRequestTimeout(): number {
-    return (
-      this.configService.get<number>('elasticsearch.trackingTimeoutMs') || 10000
-    );
-  }
-
-  /**
-   * Xây dựng `bool.must` filter dùng chung cho mọi aggregation query.
-   *
-   * Luôn bao gồm:
-   * - `labels.tenant_id`
-   * - `labels.environment` (từ `app.elasticApmEnvironment`)
-   *
-   * Tùy chọn thêm:
-   * - `labels.timeline_id` (terms)
-   * - `labels.media_content_id` (term)
-   * - `@timestamp` range (`gte` / `lt`)
-   * - `labels.platform` (term)
-   *
-   * @throws Nếu `tenantId` bị thiếu.
-   */
-  private buildBaseQuery(query: TrackingAggQuery): Record<string, unknown> {
-    if (!query.tenantId) {
-      throw new Error('tenantId is required for Elasticsearch queries');
-    }
-
-    const must: Record<string, unknown>[] = [
-      { term: { 'labels.tenant_id': query.tenantId } },
-      {
-        term: {
-          'labels.environment': this.configService.get<string>(
-            'app.elasticApmEnvironment',
-            'development',
-          ),
-        },
-      },
-    ];
-
-    if (query.timelineIds?.length) {
-      must.push({ terms: { 'labels.timeline_id': query.timelineIds } });
-    }
-
-    if (query.mediaContentId) {
-      must.push({ term: { 'labels.media_content_id': query.mediaContentId } });
-    }
-
-    const rangeFilter: Record<string, string> = {};
-    if (query.from) {
-      rangeFilter.gte = query.from.toISOString();
-    }
-    if (query.to) {
-      rangeFilter.lt = query.to.toISOString();
-    }
-    if (Object.keys(rangeFilter).length > 0) {
-      must.push({
-        range: {
-          '@timestamp': rangeFilter,
-        },
-      });
-    }
-
-    if (query.platform) {
-      must.push({ term: { 'labels.platform': query.platform } });
-    }
-
-    return { bool: { must } };
-  }
-
   /**
    * **Tab Tổng quan** — Platform metrics.
    *
@@ -545,5 +468,82 @@ export class TrackingEsService {
       aggregations: result.aggregations,
       took: result.took,
     };
+  }
+
+  /** Lấy index pattern tracking từ config (mặc định `tracking-events-*`). */
+  private getIndex(): string {
+    return (
+      this.configService.get<string>('elasticsearch.trackingIndex') ||
+      'tracking-events-*'
+    );
+  }
+
+  /** Lấy request timeout từ config (mặc định 10_000 ms). */
+  private getRequestTimeout(): number {
+    return (
+      this.configService.get<number>('elasticsearch.trackingTimeoutMs') || 10000
+    );
+  }
+
+  /**
+   * Xây dựng `bool.must` filter dùng chung cho mọi aggregation query.
+   *
+   * Luôn bao gồm:
+   * - `labels.tenant_id`
+   * - `labels.environment` (từ `app.elasticApmEnvironment`)
+   *
+   * Tùy chọn thêm:
+   * - `labels.timeline_id` (terms)
+   * - `labels.media_content_id` (term)
+   * - `@timestamp` range (`gte` / `lt`)
+   * - `labels.platform` (term)
+   *
+   * @throws Nếu `tenantId` bị thiếu.
+   */
+  private buildBaseQuery(query: TrackingAggQuery): Record<string, unknown> {
+    if (!query.tenantId) {
+      throw new Error('tenantId is required for Elasticsearch queries');
+    }
+
+    const must: Record<string, unknown>[] = [
+      { term: { 'labels.tenant_id': query.tenantId } },
+      {
+        term: {
+          'labels.environment': this.configService.get<string>(
+            'app.elasticApmEnvironment',
+            'development',
+          ),
+        },
+      },
+    ];
+
+    if (query.timelineIds?.length) {
+      must.push({ terms: { 'labels.timeline_id': query.timelineIds } });
+    }
+
+    if (query.mediaContentId) {
+      must.push({ term: { 'labels.media_content_id': query.mediaContentId } });
+    }
+
+    const rangeFilter: Record<string, string> = {};
+    if (query.from) {
+      rangeFilter.gte = query.from.toISOString();
+    }
+    if (query.to) {
+      rangeFilter.lt = query.to.toISOString();
+    }
+    if (Object.keys(rangeFilter).length > 0) {
+      must.push({
+        range: {
+          '@timestamp': rangeFilter,
+        },
+      });
+    }
+
+    if (query.platform) {
+      must.push({ term: { 'labels.platform': query.platform } });
+    }
+
+    return { bool: { must } };
   }
 }

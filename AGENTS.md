@@ -118,6 +118,7 @@ src/
 12. **API Endpoints:** 7 GET endpoints dưới `@Controller('metrics')`, nhận `x-tenant-id` header (required) và `MetricsQueryDto` query params.
 13. **Tests:** Unit tests cho TransformerService (instantiate trực tiếp, không cần TestModule).
 14. **TSDoc:** Viết TSDoc cho class, interface và method có logic phức tạp. **Không dùng `@param` / `@returns`** vì TypeScript đã inference type từ signature. Chỉ mô tả chức năng, behavior đặc biệt, hoặc cấu trúc aggregation bằng ASCII tree. Ngôn ngữ đồng nhất **tiếng Việt**.
+15. **Method Ordering:** `constructor → public methods → private methods`. Public methods đặt trên, private methods xuống dưới. Helper chỉ dùng trong class nên là `private static`. Không xen kẽ.
 
 ## Important Notes
 - `.env.example` định nghĩa `TRACKING_ES_INDEX`, `ELASTIC_APM_ENVIRONMENT`, và `INTERNAL_API_KEY`.

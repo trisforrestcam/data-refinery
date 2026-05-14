@@ -3,7 +3,7 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extractor.service';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
-import { TransformContext } from '@common/interfaces/transform-context.interface';
+import { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transform-context.interface';
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
 import {
   OVERLAY_METRICS_QUEUE,
@@ -41,6 +41,71 @@ export class OverlayMetricsProcessor extends WorkerHost {
     private readonly loader: LoaderService,
   ) {
     super();
+  }
+
+  /**
+   * Entry point của ETL job.
+   * Validate data → resolve interval → chạy per-target → per-timeline.
+   * Hỗ trợ cả legacy format và targets array.
+   */
+  async process(job: Job): Promise<void> {
+    if (job.name !== OVERLAY_METRICS_JOB) {
+      this.logger.warn(`Unknown job name: ${job.name}`);
+      return;
+    }
+
+    this.logger.log(`Processing job ${job.id}`);
+
+    const data = this.validateJobData(job.data);
+    if (!data) {
+      this.logger.warn('No valid targets or timelineIds provided, skipping');
+      return;
+    }
+
+    const intervalMs = data.timeRangeMinutes * 60 * 1000;
+    const { intervalFrom, intervalTo } = this.resolveInterval(
+      data,
+      job,
+      intervalMs,
+    );
+
+    // Normalize to targets array
+    const targets: SchedulerTarget[] = data.targets ?? [
+      {
+        tenantId: data.tenantId!,
+        matchId: data.matchId!,
+        timelineIds: data.timelineIds!,
+      },
+    ];
+
+    const failedTimelines: string[] = [];
+
+    for (const target of targets) {
+      for (const timelineId of target.timelineIds) {
+        try {
+          await this.processTimeline(
+            timelineId,
+            target.matchId,
+            target.tenantId,
+            intervalFrom,
+            intervalTo,
+          );
+        } catch (error) {
+          this.logger.error(
+            `Target ${target.matchId} / Timeline ${timelineId} failed: ${(error as Error).message}`,
+          );
+          failedTimelines.push(`${target.matchId}:${timelineId}`);
+        }
+      }
+    }
+
+    if (failedTimelines.length > 0) {
+      this.logger.warn(
+        `Job ${job.id} completed with ${failedTimelines.length} failed timelines: ${failedTimelines.join(', ')}`,
+      );
+    } else {
+      this.logger.log(`Job ${job.id} completed`);
+    }
   }
 
   /**
@@ -142,71 +207,6 @@ export class OverlayMetricsProcessor extends WorkerHost {
     const intervalFrom = new Date(intervalTo.getTime() - intervalMs);
 
     return { intervalFrom, intervalTo };
-  }
-
-  /**
-   * Entry point của ETL job.
-   * Validate data → resolve interval → chạy per-target → per-timeline.
-   * Hỗ trợ cả legacy format và targets array.
-   */
-  async process(job: Job): Promise<void> {
-    if (job.name !== OVERLAY_METRICS_JOB) {
-      this.logger.warn(`Unknown job name: ${job.name}`);
-      return;
-    }
-
-    this.logger.log(`Processing job ${job.id}`);
-
-    const data = this.validateJobData(job.data);
-    if (!data) {
-      this.logger.warn('No valid targets or timelineIds provided, skipping');
-      return;
-    }
-
-    const intervalMs = data.timeRangeMinutes * 60 * 1000;
-    const { intervalFrom, intervalTo } = this.resolveInterval(
-      data,
-      job,
-      intervalMs,
-    );
-
-    // Normalize to targets array
-    const targets: SchedulerTarget[] = data.targets ?? [
-      {
-        tenantId: data.tenantId!,
-        matchId: data.matchId!,
-        timelineIds: data.timelineIds!,
-      },
-    ];
-
-    const failedTimelines: string[] = [];
-
-    for (const target of targets) {
-      for (const timelineId of target.timelineIds) {
-        try {
-          await this.processTimeline(
-            timelineId,
-            target.matchId,
-            target.tenantId,
-            intervalFrom,
-            intervalTo,
-          );
-        } catch (error) {
-          this.logger.error(
-            `Target ${target.matchId} / Timeline ${timelineId} failed: ${(error as Error).message}`,
-          );
-          failedTimelines.push(`${target.matchId}:${timelineId}`);
-        }
-      }
-    }
-
-    if (failedTimelines.length > 0) {
-      this.logger.warn(
-        `Job ${job.id} completed with ${failedTimelines.length} failed timelines: ${failedTimelines.join(', ')}`,
-      );
-    } else {
-      this.logger.log(`Job ${job.id} completed`);
-    }
   }
 
   /**

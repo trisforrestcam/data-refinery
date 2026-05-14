@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { ElasticsearchService } from '@nestjs/elasticsearch';
 import { TrackingEsService } from '../../src/modules/overlay-metrics-etl/extractor/elasticsearch/tracking-es.service';
 import { TransformerService } from '../../src/modules/overlay-metrics-etl/transformer/transformer.service';
-import { TransformContext } from '../../src/common/interfaces/transform-context.interface';
+import { TransformContext } from '../../src/modules/overlay-metrics-etl/interfaces/transform-context.interface';
 import { LatencyAggs } from '../../src/modules/overlay-metrics-etl/extractor/elasticsearch/types/tracking-es-aggs.types';
 import {
   LatencyPercentileDto,

@@ -6,7 +6,7 @@ import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extract
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
 import { OverlayMetricsProcessor } from '@modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
-import type { TransformContext } from '@common/interfaces/transform-context.interface';
+import type { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transform-context.interface';
 
 type ExtractorMethod =
   | 'extractPlatformMetrics'

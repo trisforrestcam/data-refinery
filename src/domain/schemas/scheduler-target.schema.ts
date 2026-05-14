@@ -8,16 +8,16 @@ import { Document } from 'mongoose';
 @Schema({ timestamps: true })
 export class SchedulerTarget extends Document {
   @Prop({ required: true })
-  tenantId: string;
+  tenantId!: string;
 
   @Prop({ required: true, unique: true })
-  matchId: string;
+  matchId!: string;
 
   @Prop({ type: [String], required: true })
-  timelineIds: string[];
+  timelineIds!: string[];
 
   @Prop({ default: true })
-  enabled: boolean;
+  enabled!: boolean;
 }
 
 export const SchedulerTargetSchema = SchemaFactory.createForClass(SchedulerTarget);

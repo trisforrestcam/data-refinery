@@ -7,11 +7,11 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class SchedulerTargetDto {
   @ApiProperty({ description: 'Tenant ID', example: 'tenant-001' })
   @IsString()
-  tenantId: string;
+  tenantId!: string;
 
   @ApiProperty({ description: 'Match ID', example: '000000000000000000000000' })
   @IsString()
-  matchId: string;
+  matchId!: string;
 
   @ApiProperty({
     description: 'Danh sách timeline IDs',
@@ -20,7 +20,7 @@ export class SchedulerTargetDto {
   })
   @IsArray()
   @IsString({ each: true })
-  timelineIds: string[];
+  timelineIds!: string[];
 
   @ApiPropertyOptional({ description: 'Kích hoạt target', default: true })
   @IsOptional()
