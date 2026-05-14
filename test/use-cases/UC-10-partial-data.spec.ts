@@ -562,13 +562,13 @@ describe('UC-10 - ES partial data nhưng ETL vẫn hoàn thành', () => {
       '5m',
     );
 
-    expect(loaderMock.loadPlatformMetrics).toHaveBeenCalledWith([
+    expect(loaderMock.loadPlatformMetrics).toHaveBeenCalledWith(ctx.tenantId, [
       expect.objectContaining({ platform: 'web', sent: 0, avgRenderMs: 0 }),
       expect.objectContaining({ platform: 'ios', avgRenderMs: 0 }),
     ]);
 
     expect(loaderMock.loadDeviceBreakdown).toHaveBeenCalledTimes(3);
-    expect(loaderMock.loadDeviceBreakdown).toHaveBeenNthCalledWith(1, [
+    expect(loaderMock.loadDeviceBreakdown).toHaveBeenNthCalledWith(1, ctx.tenantId, [
       expect.objectContaining({
         dimension: 'browser',
         bucketKey: 'Chrome',
@@ -584,14 +584,14 @@ describe('UC-10 - ES partial data nhưng ETL vẫn hoàn thành', () => {
       }),
     ]);
 
-    expect(loaderMock.loadTransportComparison).toHaveBeenCalledWith([
+    expect(loaderMock.loadTransportComparison).toHaveBeenCalledWith(ctx.tenantId, [
       expect.objectContaining({ transportMode: 'webrtc', p95RenderMs: 0 }),
       expect.objectContaining({ transportMode: 'http', avgRenderMs: 0, p95RenderMs: 0 }),
     ]);
-    expect(loaderMock.loadSdkVersions).toHaveBeenCalledWith([
+    expect(loaderMock.loadSdkVersions).toHaveBeenCalledWith(ctx.tenantId, [
       expect.objectContaining({ sdkVersion: '2.1.0', count: 20, avgRenderMs: 24.5 }),
     ]);
-    expect(loaderMock.loadFailures).toHaveBeenCalledWith([
+    expect(loaderMock.loadFailures).toHaveBeenCalledWith(ctx.tenantId, [
       expect.objectContaining({
         failureReason: 'network',
         failureStep: 'render',
@@ -599,7 +599,7 @@ describe('UC-10 - ES partial data nhưng ETL vẫn hoàn thành', () => {
         percentOfFailed: 100,
       }),
     ]);
-    expect(loaderMock.loadLatency).toHaveBeenCalledWith([
+    expect(loaderMock.loadLatency).toHaveBeenCalledWith(ctx.tenantId, [
       expect.objectContaining({
         receive: expect.objectContaining({ avg: 0, max: 0, p95: 0, p99: 0 }),
         render: expect.objectContaining({ avg: 0, max: 120 }),
@@ -607,14 +607,14 @@ describe('UC-10 - ES partial data nhưng ETL vẫn hoàn thành', () => {
       }),
     ]);
     expect(loaderMock.loadTimeseries).toHaveBeenCalledTimes(5);
-    expect(loaderMock.loadTimeseries).toHaveBeenNthCalledWith(1, [
+    expect(loaderMock.loadTimeseries).toHaveBeenNthCalledWith(1, ctx.tenantId, [
       expect.objectContaining({ metric: 'sent', value: 100 }),
       expect.objectContaining({ metric: 'sent', value: 0 }),
     ]);
-    expect(loaderMock.loadTimeseries).toHaveBeenNthCalledWith(3, [
+    expect(loaderMock.loadTimeseries).toHaveBeenNthCalledWith(3, ctx.tenantId, [
       expect.objectContaining({ metric: 'rendered', value: 0 }),
     ]);
-    expect(loaderMock.loadTimeseries).toHaveBeenNthCalledWith(5, [
+    expect(loaderMock.loadTimeseries).toHaveBeenNthCalledWith(5, ctx.tenantId, [
       expect.objectContaining({ metric: 'avgRenderMs', value: 0 }),
     ]);
 

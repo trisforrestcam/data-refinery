@@ -17,6 +17,8 @@ import {
   OverlayMetricsLatencySchema,
 } from '@domain/schemas';
 import { OverlayMetricsRepository } from './overlay-metrics.repository';
+import { TenantConnectionManager } from './tenant-connection.manager';
+import { TenantModelFactory } from './tenant-model.factory';
 
 @Module({
   imports: [
@@ -30,7 +32,7 @@ import { OverlayMetricsRepository } from './overlay-metrics.repository';
       { name: OverlayMetricsLatency.name, schema: OverlayMetricsLatencySchema },
     ]),
   ],
-  providers: [OverlayMetricsRepository],
-  exports: [OverlayMetricsRepository],
+  providers: [OverlayMetricsRepository, TenantConnectionManager, TenantModelFactory],
+  exports: [OverlayMetricsRepository, TenantConnectionManager, TenantModelFactory],
 })
 export class PersistenceModule {}

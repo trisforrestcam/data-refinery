@@ -242,7 +242,7 @@ export class OverlayMetricsProcessor extends WorkerHost {
         platformAgg.aggregations,
         ctx,
       );
-      await this.loader.loadPlatformMetrics(platformData);
+      await this.loader.loadPlatformMetrics(ctx.tenantId, platformData);
       this.logger.log(
         `Timeline ${timelineId} - Platform metrics: ${platformData.length} items`,
       );
@@ -257,7 +257,7 @@ export class OverlayMetricsProcessor extends WorkerHost {
           ctx,
           dimension,
         );
-        await this.loader.loadDeviceBreakdown(deviceData);
+        await this.loader.loadDeviceBreakdown(ctx.tenantId, deviceData);
         this.logger.log(
           `Timeline ${timelineId} - Device breakdown (${dimension}): ${deviceData.length} items`,
         );
@@ -269,7 +269,7 @@ export class OverlayMetricsProcessor extends WorkerHost {
         transportAgg.aggregations,
         ctx,
       );
-      await this.loader.loadTransportComparison(transportData);
+      await this.loader.loadTransportComparison(ctx.tenantId, transportData);
       this.logger.log(
         `Timeline ${timelineId} - Transport comparison: ${transportData.length} items`,
       );
@@ -279,7 +279,7 @@ export class OverlayMetricsProcessor extends WorkerHost {
         sdkAgg.aggregations,
         ctx,
       );
-      await this.loader.loadSdkVersions(sdkData);
+      await this.loader.loadSdkVersions(ctx.tenantId, sdkData);
       this.logger.log(
         `Timeline ${timelineId} - SDK versions: ${sdkData.length} items`,
       );
@@ -289,7 +289,7 @@ export class OverlayMetricsProcessor extends WorkerHost {
         failureAgg.aggregations,
         ctx,
       );
-      await this.loader.loadFailures(failureData);
+      await this.loader.loadFailures(ctx.tenantId, failureData);
       this.logger.log(
         `Timeline ${timelineId} - Failures: ${failureData.length} items`,
       );
@@ -299,7 +299,7 @@ export class OverlayMetricsProcessor extends WorkerHost {
         latencyAgg.aggregations,
         ctx,
       );
-      await this.loader.loadLatency([latencyData]);
+      await this.loader.loadLatency(ctx.tenantId, [latencyData]);
       this.logger.log(`Timeline ${timelineId} - Latency: 1 item`);
 
       for (const metric of [
@@ -320,7 +320,7 @@ export class OverlayMetricsProcessor extends WorkerHost {
           metric,
           '5m',
         );
-        await this.loader.loadTimeseries(tsData);
+        await this.loader.loadTimeseries(ctx.tenantId, tsData);
         this.logger.log(
           `Timeline ${timelineId} - Timeseries (${metric}): ${tsData.length} items`,
         );

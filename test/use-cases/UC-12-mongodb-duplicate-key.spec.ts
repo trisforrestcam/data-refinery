@@ -1,19 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getModelToken } from '@nestjs/mongoose';
+
 import type { Job } from 'bullmq';
 import { MongoServerError } from 'mongodb';
 import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extractor.service';
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
 import { OverlayMetricsRepository } from '@infrastructure/persistence/overlay-metrics.repository';
-import {
-  OverlayMetricsDevice,
-  OverlayMetricsFailure,
-  OverlayMetricsLatency,
-  OverlayMetricsPlatform,
-  OverlayMetricsSdk,
-  OverlayMetricsTimeseries,
-  OverlayMetricsTransport,
-} from '@domain/schemas';
+import { TenantModelFactory } from '@infrastructure/persistence/tenant-model.factory';
+import { MetricType } from '@domain/enums/metric-type.enum';
 import { OverlayMetricsProcessor } from '@modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
 import { OVERLAY_METRICS_JOB } from '@common/constants/scheduler.constants';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
@@ -82,34 +75,24 @@ const createModels = (): ModelMap => ({
   latencyModel: { bulkWrite: jest.fn() },
 });
 
+const createTenantModelFactoryMock = (models: ModelMap) => ({
+  getModelByType: jest.fn().mockImplementation((_tenantId: string, type: MetricType) => {
+    switch (type) {
+      case MetricType.PLATFORM: return models.platformModel;
+      case MetricType.DEVICE: return models.deviceModel;
+      case MetricType.TRANSPORT: return models.transportModel;
+      case MetricType.SDK: return models.sdkModel;
+      case MetricType.FAILURE: return models.failureModel;
+      case MetricType.TIMESERIES: return models.timeseriesModel;
+      case MetricType.LATENCY: return models.latencyModel;
+    }
+  }),
+});
+
 const createModelProviders = (models: ModelMap) => [
   {
-    provide: getModelToken(OverlayMetricsPlatform.name),
-    useValue: models.platformModel,
-  },
-  {
-    provide: getModelToken(OverlayMetricsDevice.name),
-    useValue: models.deviceModel,
-  },
-  {
-    provide: getModelToken(OverlayMetricsTransport.name),
-    useValue: models.transportModel,
-  },
-  {
-    provide: getModelToken(OverlayMetricsSdk.name),
-    useValue: models.sdkModel,
-  },
-  {
-    provide: getModelToken(OverlayMetricsFailure.name),
-    useValue: models.failureModel,
-  },
-  {
-    provide: getModelToken(OverlayMetricsTimeseries.name),
-    useValue: models.timeseriesModel,
-  },
-  {
-    provide: getModelToken(OverlayMetricsLatency.name),
-    useValue: models.latencyModel,
+    provide: TenantModelFactory,
+    useValue: createTenantModelFactoryMock(models),
   },
 ];
 
@@ -222,9 +205,9 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
       avgRenderMs: 49,
     };
 
-    await expect(loader.loadPlatformMetrics([platformItem])).resolves.toBeUndefined();
+    await expect(loader.loadPlatformMetrics(platformItem.tenantId, [platformItem])).resolves.toBeUndefined();
     await expect(
-      loader.loadPlatformMetrics([updatedPlatformItem]),
+      loader.loadPlatformMetrics(platformItem.tenantId, [updatedPlatformItem]),
     ).resolves.toBeUndefined();
 
     expect(models.platformModel.bulkWrite).toHaveBeenCalledTimes(2);
@@ -296,9 +279,9 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
       avgRenderMs: 41,
     };
 
-    await expect(loader.loadDeviceBreakdown([deviceItem])).resolves.toBeUndefined();
+    await expect(loader.loadDeviceBreakdown(deviceItem.tenantId, [deviceItem])).resolves.toBeUndefined();
     await expect(
-      loader.loadDeviceBreakdown([updatedDeviceItem]),
+      loader.loadDeviceBreakdown(deviceItem.tenantId, [updatedDeviceItem]),
     ).resolves.toBeUndefined();
 
     expect(models.deviceModel.bulkWrite).toHaveBeenCalledTimes(2);

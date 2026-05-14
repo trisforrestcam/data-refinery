@@ -11,15 +11,8 @@ import { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transf
 import { DeviceBreakdownDto } from '@domain/dto/device-breakdown.dto';
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
 import { OverlayMetricsRepository } from '@infrastructure/persistence/overlay-metrics.repository';
-import {
-  OverlayMetricsDevice,
-  OverlayMetricsFailure,
-  OverlayMetricsLatency,
-  OverlayMetricsPlatform,
-  OverlayMetricsSdk,
-  OverlayMetricsTimeseries,
-  OverlayMetricsTransport,
-} from '@domain/schemas';
+import { TenantModelFactory } from '@infrastructure/persistence/tenant-model.factory';
+import { MetricType } from '@domain/enums/metric-type.enum';
 
 type DeviceDimension = 'browser' | 'os' | 'deviceClass';
 
@@ -104,7 +97,7 @@ describe('UC-03 Device breakdown use case', () => {
         dimension,
       );
 
-      await loader.loadDeviceBreakdown(items);
+      await loader.loadDeviceBreakdown(ctx.tenantId, items);
       loadedByDimension.push(items);
     }
 
@@ -125,6 +118,13 @@ describe('UC-03 Device breakdown use case', () => {
       return values[key] ?? defaultValue;
     });
 
+    const tenantModelFactoryMock = {
+      getModelByType: jest.fn().mockImplementation((_tenantId: string, type: MetricType) => {
+        if (type === MetricType.DEVICE) return deviceModel;
+        return createModelMock();
+      }),
+    };
+
     moduleRef = await Test.createTestingModule({
       providers: [
         ExtractorService,
@@ -134,34 +134,7 @@ describe('UC-03 Device breakdown use case', () => {
         OverlayMetricsRepository,
         { provide: ElasticsearchService, useValue: { search: esSearchMock } },
         { provide: ConfigService, useValue: { get: configGetMock } },
-        {
-          provide: getModelToken(OverlayMetricsPlatform.name),
-          useValue: createModelMock(),
-        },
-        {
-          provide: getModelToken(OverlayMetricsDevice.name),
-          useValue: deviceModel,
-        },
-        {
-          provide: getModelToken(OverlayMetricsTransport.name),
-          useValue: createModelMock(),
-        },
-        {
-          provide: getModelToken(OverlayMetricsSdk.name),
-          useValue: createModelMock(),
-        },
-        {
-          provide: getModelToken(OverlayMetricsFailure.name),
-          useValue: createModelMock(),
-        },
-        {
-          provide: getModelToken(OverlayMetricsTimeseries.name),
-          useValue: createModelMock(),
-        },
-        {
-          provide: getModelToken(OverlayMetricsLatency.name),
-          useValue: createModelMock(),
-        },
+        { provide: TenantModelFactory, useValue: tenantModelFactoryMock },
       ],
     }).compile();
 
@@ -406,9 +379,9 @@ describe('UC-03 Device breakdown use case', () => {
       expectedOsItems,
       expectedDeviceClassItems,
     ]);
-    expect(loadSpy).toHaveBeenNthCalledWith(1, expectedBrowserItems);
-    expect(loadSpy).toHaveBeenNthCalledWith(2, expectedOsItems);
-    expect(loadSpy).toHaveBeenNthCalledWith(3, expectedDeviceClassItems);
+    expect(loadSpy).toHaveBeenNthCalledWith(1, ctx.tenantId, expectedBrowserItems);
+    expect(loadSpy).toHaveBeenNthCalledWith(2, ctx.tenantId, expectedOsItems);
+    expect(loadSpy).toHaveBeenNthCalledWith(3, ctx.tenantId, expectedDeviceClassItems);
 
     expect(
       esSearchMock.mock.calls.map(
@@ -471,7 +444,7 @@ describe('UC-03 Device breakdown use case', () => {
     const loadedItems = await runDeviceBreakdownLoop();
 
     expect(loadedItems[1]).toEqual([]);
-    expect(loadSpy).toHaveBeenNthCalledWith(2, []);
+    expect(loadSpy).toHaveBeenNthCalledWith(2, ctx.tenantId, []);
     expect(deviceModel.bulkWrite).toHaveBeenCalledTimes(2);
   });
 });

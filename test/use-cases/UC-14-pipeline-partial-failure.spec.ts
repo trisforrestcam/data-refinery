@@ -225,25 +225,25 @@ describe('UC-14 - Pipeline partial failure: log error và continue, không retry
   });
 
   const createLoader = (mongoState: MongoState): LoaderMock => ({
-    loadPlatformMetrics: jest.fn().mockImplementation(async (items: Record<string, unknown>[]) => {
+    loadPlatformMetrics: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
       mongoState.platform.push(...items);
     }),
-    loadDeviceBreakdown: jest.fn().mockImplementation(async (items: Record<string, unknown>[]) => {
+    loadDeviceBreakdown: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
       mongoState.device.push(...items);
     }),
-    loadTransportComparison: jest.fn().mockImplementation(async (items: Record<string, unknown>[]) => {
+    loadTransportComparison: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
       mongoState.transport.push(...items);
     }),
-    loadSdkVersions: jest.fn().mockImplementation(async (items: Record<string, unknown>[]) => {
+    loadSdkVersions: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
       mongoState.sdk.push(...items);
     }),
-    loadFailures: jest.fn().mockImplementation(async (items: Record<string, unknown>[]) => {
+    loadFailures: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
       mongoState.failures.push(...items);
     }),
-    loadLatency: jest.fn().mockImplementation(async (items: Record<string, unknown>[]) => {
+    loadLatency: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
       mongoState.latency.push(...items);
     }),
-    loadTimeseries: jest.fn().mockImplementation(async (items: Record<string, unknown>[]) => {
+    loadTimeseries: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
       mongoState.timeseries.push(...items);
     }),
   });

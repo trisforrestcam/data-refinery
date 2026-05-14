@@ -1,18 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { AnyBulkWriteOperation } from 'mongodb';
 import { MetricType } from '@domain/enums/metric-type.enum';
 import { UNIQUE_FIELDS, INC_FIELDS, SORT_FIELDS } from './metric-meta';
-import {
-  OverlayMetricsPlatform,
-  OverlayMetricsDevice,
-  OverlayMetricsTransport,
-  OverlayMetricsSdk,
-  OverlayMetricsFailure,
-  OverlayMetricsTimeseries,
-  OverlayMetricsLatency,
-} from '@domain/schemas';
+import { TenantModelFactory } from './tenant-model.factory';
 
 /**
  * Repository trung gian cho toàn bộ 7 collections overlay metrics.
@@ -25,36 +16,17 @@ import {
  */
 @Injectable()
 export class OverlayMetricsRepository {
-  private readonly models: Record<MetricType, Model<any>>;
-
-  constructor(
-    @InjectModel(OverlayMetricsPlatform.name) platform: Model<OverlayMetricsPlatform>,
-    @InjectModel(OverlayMetricsDevice.name) device: Model<OverlayMetricsDevice>,
-    @InjectModel(OverlayMetricsTransport.name) transport: Model<OverlayMetricsTransport>,
-    @InjectModel(OverlayMetricsSdk.name) sdk: Model<OverlayMetricsSdk>,
-    @InjectModel(OverlayMetricsFailure.name) failure: Model<OverlayMetricsFailure>,
-    @InjectModel(OverlayMetricsTimeseries.name) timeseries: Model<OverlayMetricsTimeseries>,
-    @InjectModel(OverlayMetricsLatency.name) latency: Model<OverlayMetricsLatency>,
-  ) {
-    this.models = {
-      [MetricType.PLATFORM]: platform,
-      [MetricType.DEVICE]: device,
-      [MetricType.TRANSPORT]: transport,
-      [MetricType.SDK]: sdk,
-      [MetricType.FAILURE]: failure,
-      [MetricType.TIMESERIES]: timeseries,
-      [MetricType.LATENCY]: latency,
-    };
-  }
+  constructor(private readonly tenantModelFactory: TenantModelFactory) {}
 
   /**
    * Upsert accumulate: cộng dồn raw counts ($inc) và ghi đè derived metrics ($set).
    * Dùng trong ETL pipeline để aggregate data từ nhiều timelines vào cùng match record.
    * Mỗi metric type có composite unique key riêng (ví dụ: tenant + match + platform + interval).
+   * Model được lấy động qua TenantModelFactory theo tenantId để đảm bảo cách ly dữ liệu.
    */
-  async upsert(type: MetricType, items: Record<string, unknown>[]): Promise<void> {
+  async upsert(tenantId: string, type: MetricType, items: Record<string, unknown>[]): Promise<void> {
     if (!items.length) return;
-    const model = this.models[type];
+    const model = await this.tenantModelFactory.getModelByType(tenantId, type);
     const ops = this.buildUpsertOps(items, UNIQUE_FIELDS[type], INC_FIELDS[type]);
     await model.bulkWrite(ops, { ordered: false });
   }
@@ -62,9 +34,10 @@ export class OverlayMetricsRepository {
   /**
    * Query metrics từ MongoDB để phục vụ API read.
    * Sort mặc định theo thờ gian mới nhất để UI hiển thị interval gần nhất trước.
+   * Model được lấy động qua TenantModelFactory theo tenantId để đảm bảo cách ly dữ liệu.
    */
-  async find<T = unknown>(type: MetricType, filter: Record<string, unknown>): Promise<T[]> {
-    const model = this.models[type];
+  async find<T = unknown>(tenantId: string, type: MetricType, filter: Record<string, unknown>): Promise<T[]> {
+    const model = await this.tenantModelFactory.getModelByType(tenantId, type);
     const sortField = SORT_FIELDS[type];
     return model.find(filter).sort({ [sortField]: -1 }).lean().exec();
   }

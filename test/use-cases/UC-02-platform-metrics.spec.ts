@@ -44,7 +44,7 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
     Promise<EsSearchResult>,
     [EsSearchRequest, object]
   >;
-  let loadPlatformMetricsMock: jest.Mock<Promise<void>, [PlatformMetricDto[]]>;
+  let loadPlatformMetricsMock: jest.Mock<Promise<void>, [string, PlatformMetricDto[]]>;
 
   const intervalFrom = new Date('2026-05-13T10:00:00.000Z');
   const intervalTo = new Date('2026-05-13T10:05:00.000Z');
@@ -143,7 +143,7 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
       extracted.aggregations,
       ctx,
     );
-    await loaderService.loadPlatformMetrics(items);
+    await loaderService.loadPlatformMetrics(ctx.tenantId, items);
 
     const expectedItems: PlatformMetricDto[] = [
       {
@@ -201,7 +201,7 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
 
     expect(items).toEqual(expectedItems);
     expect(loadPlatformMetricsMock).toHaveBeenCalledTimes(1);
-    expect(loadPlatformMetricsMock).toHaveBeenCalledWith(expectedItems);
+    expect(loadPlatformMetricsMock).toHaveBeenCalledWith(ctx.tenantId, expectedItems);
   });
 
   // Nghiệp vụ: query Elasticsearch phải gom theo labels.platform và lọc đúng các stage sent/received/rendered/render-failed.
@@ -288,7 +288,7 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
       extracted.aggregations,
       ctx,
     );
-    await loaderService.loadPlatformMetrics(items);
+    await loaderService.loadPlatformMetrics(ctx.tenantId, items);
 
     expect(items[0]).toMatchObject({
       platform: 'web',
@@ -314,7 +314,7 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
       netSuccessRate: 120,
       avgRenderMs: 0,
     });
-    expect(loadPlatformMetricsMock).toHaveBeenCalledWith(items);
+    expect(loadPlatformMetricsMock).toHaveBeenCalledWith(ctx.tenantId, items);
   });
 
   // Nghiệp vụ: event thiếu labels.platform từ ES phải được gom vào platform unknown và vẫn được load.
@@ -339,7 +339,7 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
       extracted.aggregations,
       ctx,
     );
-    await loaderService.loadPlatformMetrics(items);
+    await loaderService.loadPlatformMetrics(ctx.tenantId, items);
 
     expect(items).toEqual([
       {
@@ -360,6 +360,6 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
         intervalTo,
       },
     ]);
-    expect(loadPlatformMetricsMock).toHaveBeenCalledWith(items);
+    expect(loadPlatformMetricsMock).toHaveBeenCalledWith(ctx.tenantId, items);
   });
 });

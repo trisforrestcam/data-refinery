@@ -216,7 +216,7 @@ describe('UC-01 - Full ETL pipeline cho 1 trận đấu live', () => {
       expectedContext,
     );
     expect(loader.loadLatency).toHaveBeenCalledTimes(1);
-    expect(loader.loadLatency).toHaveBeenCalledWith([
+    expect(loader.loadLatency).toHaveBeenCalledWith(expectedContext.tenantId, [
       expect.objectContaining({ metricType: 'overall' }),
     ]);
   });
@@ -241,7 +241,7 @@ describe('UC-01 - Full ETL pipeline cho 1 trận đấu live', () => {
         metric,
         '5m',
       );
-      expect(loader.loadTimeseries).toHaveBeenNthCalledWith(index + 1, [
+      expect(loader.loadTimeseries).toHaveBeenNthCalledWith(index + 1, expectedContext.tenantId, [
         { metric, interval: '5m', value: 100 },
       ]);
     });

@@ -1,19 +1,11 @@
 import { Logger } from '@nestjs/common';
-import { getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import type { Job } from 'bullmq';
 import { ExtractorService } from '../../src/modules/overlay-metrics-etl/extractor/extractor.service';
 import { LoaderService } from '../../src/modules/overlay-metrics-etl/loader/loader.service';
 import { OverlayMetricsRepository } from '../../src/infrastructure/persistence/overlay-metrics.repository';
-import {
-  OverlayMetricsDevice,
-  OverlayMetricsFailure,
-  OverlayMetricsLatency,
-  OverlayMetricsPlatform,
-  OverlayMetricsSdk,
-  OverlayMetricsTimeseries,
-  OverlayMetricsTransport,
-} from '../../src/domain/schemas';
+import { TenantModelFactory } from '../../src/infrastructure/persistence/tenant-model.factory';
+import { MetricType } from '../../src/domain/enums/metric-type.enum';
 import { OverlayMetricsProcessor } from '../../src/modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
 import { TransformerService } from '../../src/modules/overlay-metrics-etl/transformer/transformer.service';
 import type { LatencyPercentileDto } from '../../src/domain/dto/latency-percentile.dto';
@@ -202,6 +194,15 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
       transformTimeseries: jest.fn().mockReturnValue([]),
     };
 
+    const tenantModelFactoryMock = {
+      getModelByType: jest.fn().mockImplementation((_tenantId: string, type: MetricType) => {
+        switch (type) {
+          case MetricType.PLATFORM: return platformModel;
+          default: return passiveModel;
+        }
+      }),
+    };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         OverlayMetricsProcessor,
@@ -209,31 +210,7 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
         OverlayMetricsRepository,
         { provide: ExtractorService, useValue: extractor },
         { provide: TransformerService, useValue: transformer },
-        {
-          provide: getModelToken(OverlayMetricsPlatform.name),
-          useValue: platformModel,
-        },
-        {
-          provide: getModelToken(OverlayMetricsDevice.name),
-          useValue: passiveModel,
-        },
-        {
-          provide: getModelToken(OverlayMetricsTransport.name),
-          useValue: passiveModel,
-        },
-        { provide: getModelToken(OverlayMetricsSdk.name), useValue: passiveModel },
-        {
-          provide: getModelToken(OverlayMetricsFailure.name),
-          useValue: passiveModel,
-        },
-        {
-          provide: getModelToken(OverlayMetricsTimeseries.name),
-          useValue: passiveModel,
-        },
-        {
-          provide: getModelToken(OverlayMetricsLatency.name),
-          useValue: passiveModel,
-        },
+        { provide: TenantModelFactory, useValue: tenantModelFactoryMock },
       ],
     }).compile();
 
