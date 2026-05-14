@@ -1,10 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
-import { Job } from 'bullmq';
 import { ExtractorService } from '../../src/modules/overlay-metrics-etl/extractor/extractor.service';
 import { TrackingEsService } from '../../src/modules/overlay-metrics-etl/extractor/elasticsearch/tracking-es.service';
 import { TransformerService } from '../../src/modules/overlay-metrics-etl/transformer/transformer.service';
 import { LoaderService } from '../../src/modules/overlay-metrics-etl/loader/loader.service';
+import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
 import { OverlayMetricsRepository } from '../../src/infrastructure/persistence/overlay-metrics.repository';
 import { TenantModelFactory } from '../../src/infrastructure/persistence/tenant-model.factory';
 import { MetricType } from '../../src/domain/enums/metric-type.enum';
@@ -17,8 +17,6 @@ import {
   OverlayMetricsTimeseries,
   OverlayMetricsTransport,
 } from '../../src/domain/schemas';
-import { OverlayMetricsProcessor } from '../../src/modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
-import { OVERLAY_METRICS_JOB } from '../../src/common/constants/scheduler.constants';
 import { TransformContext } from '../../src/modules/overlay-metrics-etl/interfaces/transform-context.interface';
 import { LatencyPercentileDto } from '../../src/domain/dto/latency-percentile.dto';
 
@@ -176,28 +174,25 @@ describe('UC-09 - Empty window không có events trong 5 phút', () => {
 
     const moduleRef = await Test.createTestingModule({
       providers: [
-        OverlayMetricsProcessor,
+        TimelineProcessorService,
         ExtractorService,
         TransformerService,
         { provide: TrackingEsService, useValue: trackingEsMock },
         { provide: LoaderService, useValue: loaderMock },
       ],
     }).compile();
-    const processor = moduleRef.get(OverlayMetricsProcessor);
+    const timelineProcessor = moduleRef.get(TimelineProcessorService);
 
-    const job = {
-      id: 'job-empty-window',
-      name: OVERLAY_METRICS_JOB,
-      timestamp: Date.parse('2026-05-13T10:07:30.000Z'),
-      data: {
-        timeRangeMinutes: 5,
-        timelineIds: [ctx.timelineId],
-        tenantId: ctx.tenantId,
-        matchId: ctx.matchId,
-      },
-    } as Job;
+    const payload = {
+      tenantId: ctx.tenantId,
+      matchId: ctx.matchId,
+      timelineId: ctx.timelineId,
+      timeRangeMinutes: 5,
+      intervalFrom: intervalFrom.toISOString(),
+      intervalTo: intervalTo.toISOString(),
+    };
 
-    await expect(processor.process(job)).resolves.toBeUndefined();
+    await expect(timelineProcessor.processTimeline(payload)).resolves.toBeUndefined();
 
     const expectedQuery = {
       timelineIds: [ctx.timelineId],

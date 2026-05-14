@@ -1,16 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Queue } from 'bullmq';
-import { InjectQueue } from '@nestjs/bullmq';
+import { JobProducerService } from '@modules/overlay-metrics-etl/kafka/job-producer.service';
 import { OverlayMetricsRepository } from '@infrastructure/persistence/overlay-metrics.repository';
 import { SchedulerConfigService } from '@modules/overlay-metrics-etl/scheduler/scheduler-config.service';
 import { MetricType } from '@domain/enums/metric-type.enum';
 import { MetricsQueryDto } from './dto/metrics-query.dto';
 import { BackfillJobDto } from './dto/backfill-job.dto';
 import { SchedulerTargetDto } from './dto/scheduler-target.dto';
-import {
-  OVERLAY_METRICS_QUEUE,
-  OVERLAY_METRICS_JOB,
-} from '@common/constants/scheduler.constants';
+
 
 /**
  * Service phục vụ API read metrics từ MongoDB.
@@ -23,8 +19,7 @@ export class MetricsApiService {
 
   constructor(
     private readonly repository: OverlayMetricsRepository,
-    @InjectQueue(OVERLAY_METRICS_QUEUE)
-    private readonly queue: Queue,
+    private readonly jobProducerService: JobProducerService,
     private readonly schedulerConfig: SchedulerConfigService,
   ) {}
 
@@ -94,34 +89,7 @@ export class MetricsApiService {
    * Job sẽ được processor xử lý async — accumulate data thay vì ghi đè.
    */
   async triggerBackfill(tenantId: string, dto: BackfillJobDto) {
-    const jobData = {
-      name: OVERLAY_METRICS_JOB,
-      data: {
-        tenantId: dto.tenantId || tenantId,
-        matchId: dto.matchId,
-        timelineIds: dto.timelineIds,
-        timeRangeMinutes: dto.timeRangeMinutes ?? 5,
-        ...(dto.intervalFrom ? { intervalFrom: dto.intervalFrom } : {}),
-        ...(dto.intervalTo ? { intervalTo: dto.intervalTo } : {}),
-      },
-      opts: {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 5000 },
-      },
-    };
-
-    const job = await this.queue.add(jobData.name, jobData.data, jobData.opts);
-
-    return {
-      jobId: job.id,
-      status: 'enqueued',
-      tenantId: dto.tenantId || tenantId,
-      matchId: dto.matchId,
-      timelineIds: dto.timelineIds,
-      intervalFrom: dto.intervalFrom,
-      intervalTo: dto.intervalTo,
-      timeRangeMinutes: dto.timeRangeMinutes ?? 5,
-    };
+    return this.jobProducerService.triggerBackfill(tenantId, dto);
   }
 
   /**

@@ -1,16 +1,14 @@
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import type { Job } from 'bullmq';
 import { ExtractorService } from '../../src/modules/overlay-metrics-etl/extractor/extractor.service';
 import { LoaderService } from '../../src/modules/overlay-metrics-etl/loader/loader.service';
+import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
 import { OverlayMetricsRepository } from '../../src/infrastructure/persistence/overlay-metrics.repository';
 import { TenantModelFactory } from '../../src/infrastructure/persistence/tenant-model.factory';
 import { MetricType } from '../../src/domain/enums/metric-type.enum';
-import { OverlayMetricsProcessor } from '../../src/modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
 import { TransformerService } from '../../src/modules/overlay-metrics-etl/transformer/transformer.service';
 import type { LatencyPercentileDto } from '../../src/domain/dto/latency-percentile.dto';
 import type { PlatformMetricDto } from '../../src/domain/dto/platform-metric.dto';
-import { OVERLAY_METRICS_JOB } from '../../src/common/constants/scheduler.constants';
 
 type PlatformBulkWriteOp = {
   updateOne: {
@@ -83,20 +81,14 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
     ...metrics,
   });
 
-  const buildJob = (id: string): Job =>
-    ({
-      id,
-      name: OVERLAY_METRICS_JOB,
-      timestamp: Date.parse('2026-05-13T10:05:00.000Z'),
-      data: {
-        timeRangeMinutes: 5,
-        timelineIds: [timelineId],
-        tenantId,
-        matchId,
-        intervalFrom,
-        intervalTo,
-      },
-    }) as Job;
+  const payload = {
+    tenantId,
+    matchId,
+    timelineId,
+    timeRangeMinutes: 5,
+    intervalFrom: intervalFrom.toISOString(),
+    intervalTo: intervalTo.toISOString(),
+  };
 
   const createPassiveModel = (): { bulkWrite: jest.Mock } => ({
     bulkWrite: jest.fn().mockResolvedValue(undefined),
@@ -157,7 +149,7 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
 
   const createScenario = async (platformRuns: PlatformMetricDto[][]): Promise<{
     moduleRef: TestingModule;
-    processor: OverlayMetricsProcessor;
+    timelineProcessor: TimelineProcessorService;
     extractor: { extractPlatformMetrics: jest.Mock };
     transformer: { transformPlatformMetrics: jest.Mock };
     platformModel: PlatformModelMock;
@@ -205,7 +197,7 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
 
     const moduleRef = await Test.createTestingModule({
       providers: [
-        OverlayMetricsProcessor,
+        TimelineProcessorService,
         LoaderService,
         OverlayMetricsRepository,
         { provide: ExtractorService, useValue: extractor },
@@ -216,7 +208,7 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
 
     return {
       moduleRef,
-      processor: moduleRef.get(OverlayMetricsProcessor),
+      timelineProcessor: moduleRef.get(TimelineProcessorService),
       extractor: { extractPlatformMetrics },
       transformer: { transformPlatformMetrics: transformer.transformPlatformMetrics },
       platformModel,
@@ -310,14 +302,14 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
       }),
     ];
 
-    const { moduleRef, processor, extractor, transformer, platformModel } =
+    const { moduleRef, timelineProcessor, extractor, transformer, platformModel } =
       await createScenario([firstRunDocs, secondRunDocs]);
 
     try {
-      await processor.process(buildJob('job-platform-first'));
+      await timelineProcessor.processTimeline(payload);
       expect(platformModel.countDocuments()).toBe(3);
 
-      await processor.process(buildJob('job-platform-rerun'));
+      await timelineProcessor.processTimeline(payload);
 
       expect(extractor.extractPlatformMetrics).toHaveBeenCalledTimes(2);
       expect(transformer.transformPlatformMetrics).toHaveBeenCalledTimes(2);
@@ -463,16 +455,16 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
       }),
     ];
 
-    const { moduleRef, processor, platformModel } = await createScenario([
+    const { moduleRef, timelineProcessor, platformModel } = await createScenario([
       firstRunDocs,
       secondRunDocs,
     ]);
 
     try {
-      await processor.process(buildJob('job-platform-new-1'));
+      await timelineProcessor.processTimeline(payload);
       expect(platformModel.countDocuments()).toBe(3);
 
-      await processor.process(buildJob('job-platform-new-2'));
+      await timelineProcessor.processTimeline(payload);
 
       const secondOps = platformModel.bulkWrite.mock.calls[1][0] as PlatformBulkWriteOp[];
 

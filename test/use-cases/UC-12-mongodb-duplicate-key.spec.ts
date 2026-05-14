@@ -1,14 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 
-import type { Job } from 'bullmq';
 import { MongoServerError } from 'mongodb';
 import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extractor.service';
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
+import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
 import { OverlayMetricsRepository } from '@infrastructure/persistence/overlay-metrics.repository';
 import { TenantModelFactory } from '@infrastructure/persistence/tenant-model.factory';
 import { MetricType } from '@domain/enums/metric-type.enum';
-import { OverlayMetricsProcessor } from '@modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
-import { OVERLAY_METRICS_JOB } from '@common/constants/scheduler.constants';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
 import type {
   DeviceBreakdownDto,
@@ -143,7 +141,7 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
 
     moduleRef = await Test.createTestingModule({
       providers: [
-        OverlayMetricsProcessor,
+        TimelineProcessorService,
         LoaderService,
         OverlayMetricsRepository,
         { provide: ExtractorService, useValue: extractor },
@@ -152,21 +150,18 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
       ],
     }).compile();
 
-    const processor = moduleRef.get(OverlayMetricsProcessor);
-    const job = {
-      id: 'job-uc-12-duplicate-key',
-      name: OVERLAY_METRICS_JOB,
-      timestamp: intervalTo.getTime(),
-      data: {
-        timeRangeMinutes: 5,
-        timelineIds: [platformItem.timelineId],
-        tenantId: platformItem.tenantId,
-        matchId: platformItem.matchId,
-      },
-    } as Job;
+    const timelineProcessor = moduleRef.get(TimelineProcessorService);
+    const payload = {
+      tenantId: platformItem.tenantId,
+      matchId: platformItem.matchId,
+      timelineId: platformItem.timelineId,
+      timeRangeMinutes: 5,
+      intervalFrom: platformItem.intervalFrom.toISOString(),
+      intervalTo: platformItem.intervalTo.toISOString(),
+    };
 
-    // Processor no longer throws on timeline failure — it logs error and continues
-    await expect(processor.process(job)).resolves.toBeUndefined();
+    // TimelineProcessorService throws khi pipeline step fail để Kafka consumer xử lý retry/DLQ
+    await expect(timelineProcessor.processTimeline(payload)).rejects.toThrow(MongoServerError);
 
     expect(models.platformModel.bulkWrite).toHaveBeenCalledTimes(1);
     expect(models.platformModel.bulkWrite).toHaveBeenCalledWith(

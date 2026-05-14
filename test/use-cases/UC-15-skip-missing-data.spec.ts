@@ -1,11 +1,8 @@
 import { Logger } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
-import type { TestingModule } from '@nestjs/testing';
-import type { Job } from 'bullmq';
+import { Test, TestingModule } from '@nestjs/testing';
 import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extractor.service';
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
-import { OVERLAY_METRICS_JOB } from '@common/constants/scheduler.constants';
-import { OverlayMetricsProcessor } from '@modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
+import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
 
 type ExtractorMethod =
@@ -39,52 +36,39 @@ type ExtractorMock = Record<ExtractorMethod, jest.Mock>;
 type TransformerMock = Record<TransformerMethod, jest.Mock>;
 type LoaderMock = Record<LoaderMethod, jest.Mock>;
 
-describe('UC-15 - Skip job khi thiếu timelineIds hoặc tenantId', () => {
+describe('UC-15 - Throw khi payload thiếu required fields', () => {
   let moduleRef: TestingModule;
-  let processor: OverlayMetricsProcessor;
+  let timelineProcessor: TimelineProcessorService;
   let extractor: ExtractorMock;
   let transformer: TransformerMock;
   let loader: LoaderMock;
   let warnSpy: jest.SpyInstance;
   let logSpy: jest.SpyInstance;
 
-  const missingRequiredDataWarn =
-    'No valid targets or timelineIds provided, skipping';
-  const validJobData = {
+  const validPayload = {
     timeRangeMinutes: 5,
-    timelineIds: ['tl-1'],
+    timelineId: 'tl-1',
     tenantId: 't1',
     matchId: 'match-1',
   };
   const skipCases: Array<{ name: string; data: Record<string, unknown> }> = [
     {
-      name: 'skip khi thiếu cả timelineIds và tenantId',
+      name: 'throw khi thiếu cả timelineId và tenantId',
       data: { timeRangeMinutes: 5 },
     },
     {
-      name: 'skip khi thiếu timelineIds',
-      data: { timeRangeMinutes: 5, tenantId: 't1' },
+      name: 'throw khi thiếu timelineId',
+      data: { timeRangeMinutes: 5, tenantId: 't1', matchId: 'match-1' },
     },
     {
-      name: 'skip khi thiếu tenantId',
-      data: { timeRangeMinutes: 5, timelineIds: ['tl-1'] },
+      name: 'throw khi thiếu tenantId',
+      data: { timeRangeMinutes: 5, timelineId: 'tl-1', matchId: 'match-1' },
     },
     {
-      name: 'skip khi timelineIds rỗng',
-      data: { timeRangeMinutes: 5, timelineIds: [], tenantId: 't1' },
+      name: 'throw khi timelineId rỗng',
+      data: { timeRangeMinutes: 5, timelineId: '', tenantId: 't1', matchId: 'match-1' },
     },
   ];
-
-  const makeJob = (
-    data: Record<string, unknown>,
-    name: string = OVERLAY_METRICS_JOB,
-  ): Job =>
-    ({
-      id: `${name}-job-uc-15`,
-      name,
-      timestamp: Date.parse('2026-05-13T10:07:30.000Z'),
-      data,
-    }) as Job;
 
   const expectNoPipelineCalls = (): void => {
     Object.values(extractor).forEach((mock) => {
@@ -152,14 +136,14 @@ describe('UC-15 - Skip job khi thiếu timelineIds hoặc tenantId', () => {
 
     moduleRef = await Test.createTestingModule({
       providers: [
-        OverlayMetricsProcessor,
+        TimelineProcessorService,
         { provide: ExtractorService, useValue: extractor },
         { provide: TransformerService, useValue: transformer },
         { provide: LoaderService, useValue: loader },
       ],
     }).compile();
 
-    processor = moduleRef.get(OverlayMetricsProcessor);
+    timelineProcessor = moduleRef.get(TimelineProcessorService);
     warnSpy.mockClear();
     logSpy.mockClear();
   });
@@ -170,36 +154,19 @@ describe('UC-15 - Skip job khi thiếu timelineIds hoặc tenantId', () => {
   });
 
   it.each(skipCases)('$name', async ({ data }) => {
-    await expect(processor.process(makeJob(data))).resolves.toBeUndefined();
-
-    expect(warnSpy).toHaveBeenCalledWith(missingRequiredDataWarn);
-    expectNoPipelineCalls();
-    expect(logSpy).toHaveBeenCalledWith(
-      `Processing job ${OVERLAY_METRICS_JOB}-job-uc-15`,
+    await expect(timelineProcessor.processTimeline(data as any)).rejects.toThrow(
+      'Invalid timeline payload: missing tenantId, matchId, timelineId, or timeRangeMinutes',
     );
+
+    expectNoPipelineCalls();
   });
 
-  it('process khi job có timelineIds và tenantId hợp lệ', async () => {
-    await expect(processor.process(makeJob(validJobData))).resolves.toBeUndefined();
+  it('process khi payload có timelineId, tenantId và matchId hợp lệ', async () => {
+    await expect(timelineProcessor.processTimeline(validPayload)).resolves.toBeUndefined();
 
-    expect(warnSpy).not.toHaveBeenCalledWith(missingRequiredDataWarn);
     expect(extractor.extractPlatformMetrics).toHaveBeenCalledTimes(1);
     expect(loader.loadPlatformMetrics).toHaveBeenCalledTimes(1);
     expect(extractor.extractTimeseries).toHaveBeenCalledTimes(5);
     expect(loader.loadTimeseries).toHaveBeenCalledTimes(5);
-  });
-
-  it('log warn và return khi nhận unknown job name', async () => {
-    const unknownJobName = 'unknown-job-name';
-
-    await expect(
-      processor.process(makeJob(validJobData, unknownJobName)),
-    ).resolves.toBeUndefined();
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      `Unknown job name: ${unknownJobName}`,
-    );
-    expectNoPipelineCalls();
-    expect(logSpy).not.toHaveBeenCalled();
   });
 });

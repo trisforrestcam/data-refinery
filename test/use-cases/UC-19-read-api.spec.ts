@@ -1,15 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { getQueueToken } from '@nestjs/bullmq';
 import { MetricsApiController } from '@modules/overlay-metrics-api/metrics-api.controller';
 import { MetricsApiService } from '@modules/overlay-metrics-api/metrics-api.service';
 import { InternalApiGuard } from '@common/guards/internal-api.guard';
 import { MetricsQueryDto } from '@modules/overlay-metrics-api/dto/metrics-query.dto';
+import { BackfillJobDto } from '@modules/overlay-metrics-api/dto/backfill-job.dto';
 import { OverlayMetricsRepository } from '@infrastructure/persistence/overlay-metrics.repository';
 import { SchedulerConfigService } from '@modules/overlay-metrics-etl/scheduler/scheduler-config.service';
+import { JobProducerService } from '@modules/overlay-metrics-etl/kafka/job-producer.service';
 import { MetricType } from '@domain/enums/metric-type.enum';
-import { OVERLAY_METRICS_QUEUE } from '@common/constants/scheduler.constants';
 
 describe('UC-19 - Read API tests', () => {
   const tenantId = 'tenant-read-001';
@@ -67,15 +67,17 @@ describe('UC-19 - Read API tests', () => {
   describe('MetricsApiService buildFilter', () => {
     let service: MetricsApiService;
     let repository: { find: jest.Mock };
+    let jobProducerService: { triggerBackfill: jest.Mock };
 
     beforeEach(async () => {
       repository = { find: jest.fn().mockResolvedValue([]) };
+      jobProducerService = { triggerBackfill: jest.fn().mockResolvedValue({ status: 'published', correlationId: 'corr-123' }) };
 
       const moduleRef = await Test.createTestingModule({
         providers: [
           MetricsApiService,
           { provide: OverlayMetricsRepository, useValue: repository },
-          { provide: getQueueToken(OVERLAY_METRICS_QUEUE), useValue: { add: jest.fn() } },
+          { provide: JobProducerService, useValue: jobProducerService },
           { provide: SchedulerConfigService, useValue: { getActiveTargets: jest.fn(), upsertTarget: jest.fn(), disableTarget: jest.fn() } },
         ],
       }).compile();
@@ -147,16 +149,54 @@ describe('UC-19 - Read API tests', () => {
         metric: 'sent',
       });
     });
+
+    it('triggerBackfill gọi jobProducerService.triggerBackfill với đúng DTO', async () => {
+      const dto: BackfillJobDto = {
+        tenantId: 'tenant-001',
+        matchId: 'match-123',
+        timelineIds: ['tl-1', 'tl-2'],
+        timeRangeMinutes: 5,
+      };
+
+      await service.triggerBackfill(tenantId, dto);
+
+      expect(jobProducerService.triggerBackfill).toHaveBeenCalledWith(tenantId, dto);
+    });
+
+    it('triggerBackfill trả về status published và correlationId', async () => {
+      const dto: BackfillJobDto = {
+        tenantId: 'tenant-001',
+        matchId: 'match-123',
+        timelineIds: ['tl-1'],
+      };
+
+      jobProducerService.triggerBackfill = jest.fn().mockResolvedValue({
+        status: 'published',
+        correlationId: 'uuid-abc-123',
+      });
+
+      const result = await service.triggerBackfill(tenantId, dto);
+
+      expect(result).toMatchObject({
+        status: 'published',
+        correlationId: 'uuid-abc-123',
+      });
+    });
   });
 
   describe('MetricsApiController routing', () => {
     let controller: MetricsApiController;
-    let service: { getPlatformMetrics: jest.Mock; getTimeseries: jest.Mock };
+    let service: {
+      getPlatformMetrics: jest.Mock;
+      getTimeseries: jest.Mock;
+      triggerBackfill: jest.Mock;
+    };
 
     beforeEach(async () => {
       service = {
         getPlatformMetrics: jest.fn().mockResolvedValue([{ platform: 'web' }]),
         getTimeseries: jest.fn().mockResolvedValue([{ metric: 'sent' }]),
+        triggerBackfill: jest.fn().mockResolvedValue({ status: 'published', correlationId: 'corr-test' }),
       };
 
       const moduleRef = await Test.createTestingModule({
@@ -182,6 +222,22 @@ describe('UC-19 - Read API tests', () => {
       const result = await controller.getTimeseries(tenantId, query, 'received');
       expect(service.getTimeseries).toHaveBeenCalledWith(tenantId, query, 'received');
       expect(result).toEqual([{ metric: 'sent' }]);
+    });
+
+    it('backfill endpoint trả về status published và correlationId', async () => {
+      const dto: BackfillJobDto = {
+        tenantId: 'tenant-001',
+        matchId: 'match-123',
+        timelineIds: ['tl-1'],
+      };
+
+      const result = await controller.backfill(tenantId, dto);
+
+      expect(service.triggerBackfill).toHaveBeenCalledWith(tenantId, dto);
+      expect(result).toMatchObject({
+        status: 'published',
+        correlationId: 'corr-test',
+      });
     });
   });
 });

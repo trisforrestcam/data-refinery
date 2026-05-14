@@ -1,164 +1,117 @@
-import { getQueueToken } from '@nestjs/bullmq';
-import { errors } from '@elastic/transport';
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import type { Job } from 'bullmq';
-import { OVERLAY_METRICS_JOB, OVERLAY_METRICS_QUEUE, OVERLAY_METRICS_SCHEDULER_ID } from '@common/constants/scheduler.constants';
-import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extractor.service';
-import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
-import { OverlayMetricsProcessor } from '@modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
-import { SchedulerService } from '@modules/overlay-metrics-etl/scheduler/scheduler.service';
-import { SchedulerConfigService } from '@modules/overlay-metrics-etl/scheduler/scheduler-config.service';
-import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
+import { ConfigService } from '@nestjs/config';
+import { KafkaConsumerService } from '@modules/overlay-metrics-etl/kafka/kafka-consumer.service';
+import { KafkaProducerService, JobPayload } from '@modules/overlay-metrics-etl/kafka/kafka-producer.service';
+import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
 
-type ExtractorMethod =
-  | 'extractPlatformMetrics'
-  | 'extractDeviceBreakdown'
-  | 'extractTransportComparison'
-  | 'extractSdkVersions'
-  | 'extractFailures'
-  | 'extractLatency'
-  | 'extractTimeseries';
+// ---------------------------------------------------------------------------
+// Mock kafkajs trước khi module load
+// ---------------------------------------------------------------------------
 
-type TransformerMethod =
-  | 'transformPlatformMetrics'
-  | 'transformDeviceBreakdown'
-  | 'transformTransportComparison'
-  | 'transformSdkVersions'
-  | 'transformFailures'
-  | 'transformLatency'
-  | 'transformTimeseries';
+const pauseMock = jest.fn();
+const resumeMock = jest.fn();
+const commitOffsetsMock = jest.fn().mockResolvedValue(undefined);
+const connectMock = jest.fn().mockResolvedValue(undefined);
+const subscribeMock = jest.fn().mockResolvedValue(undefined);
+const runMock = jest.fn().mockResolvedValue(undefined);
+const disconnectMock = jest.fn().mockResolvedValue(undefined);
 
-type LoaderMethod =
-  | 'loadPlatformMetrics'
-  | 'loadDeviceBreakdown'
-  | 'loadTransportComparison'
-  | 'loadSdkVersions'
-  | 'loadFailures'
-  | 'loadLatency'
-  | 'loadTimeseries';
+let capturedEachMessage: ((payload: {
+  topic: string;
+  partition: number;
+  message: { offset: string; value: Buffer | null; key: Buffer | null };
+}) => Promise<void>) | undefined;
 
-type ExtractorMock = Record<ExtractorMethod, jest.Mock>;
-type TransformerMock = Record<TransformerMethod, jest.Mock>;
-type LoaderMock = Record<LoaderMethod, jest.Mock>;
+runMock.mockImplementation(({ eachMessage }: { eachMessage: typeof capturedEachMessage }) => {
+  capturedEachMessage = eachMessage;
+});
 
-type RetryOutcome = {
-  status: 'completed' | 'failed';
-  attemptsMade: number;
-  scheduledBackoffs: number[];
-  error?: Error;
+const mockConsumer = {
+  connect: connectMock,
+  subscribe: subscribeMock,
+  run: runMock,
+  pause: pauseMock,
+  resume: resumeMock,
+  commitOffsets: commitOffsetsMock,
+  disconnect: disconnectMock,
 };
 
-type RetryableJob = Pick<Job, 'id' | 'name' | 'data' | 'timestamp' | 'delay' | 'opts'>;
+jest.mock('kafkajs', () => ({
+  Kafka: jest.fn().mockImplementation(() => ({
+    consumer: jest.fn().mockReturnValue(mockConsumer),
+  })),
+}));
 
-describe('UC-11 - Elasticsearch connection error retry', () => {
-  const intervalFrom = new Date('2026-05-13T10:00:00.000Z');
-  const intervalTo = new Date('2026-05-13T10:05:00.000Z');
-  const jobOpts = {
-    attempts: 3,
-    backoff: { type: 'exponential' as const, delay: 5000 },
-  };
-  const jobData = {
-    timeRangeMinutes: 5,
-    timelineIds: ['timeline-es-001'],
-    tenantId: 'tenant-es-001',
-    matchId: 'match-es-001',
-  };
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-  const createAggResult = (name: string) => ({
-    aggregations: { name },
-    took: 3,
+describe('UC-11 - Elasticsearch connection error retry qua Kafka consumer', () => {
+  const tenantId = 'tenant-es-001';
+  const matchId = 'match-es-001';
+  const timelineId = 'timeline-es-001';
+
+  const createPayload = (overrides?: Partial<JobPayload>): JobPayload => ({
+    version: 1,
+    jobType: 'extract-transform-load-metrics',
+    tenantId,
+    matchId,
+    timelineId,
+    timeRangeMinutes: 60,
+    origin: 'scheduled',
+    ...overrides,
   });
 
-  const createJob = (): RetryableJob => ({
-    id: 'job-uc-11',
-    name: OVERLAY_METRICS_JOB,
-    data: jobData,
-    timestamp: Date.parse('2026-05-13T10:07:30.000Z'),
-    delay: 0,
-    opts: jobOpts,
+  const createMockConfigService = () => ({
+    get: jest.fn((key: string) => {
+      const map: Record<string, unknown> = {
+        'kafka.clientId': 'data-refinery-test',
+        'kafka.brokers': ['localhost:9092'],
+        'kafka.groupId': 'test-consumers',
+        'kafka.maxRetries': 3,
+        'kafka.retryDelayMs': 5000,
+      };
+      return map[key];
+    }),
   });
 
-  const createExtractorMock = (): ExtractorMock => ({
-    extractPlatformMetrics: jest.fn(),
-    extractDeviceBreakdown: jest.fn().mockResolvedValue(createAggResult('device')),
-    extractTransportComparison: jest.fn().mockResolvedValue(createAggResult('transport')),
-    extractSdkVersions: jest.fn().mockResolvedValue(createAggResult('sdk')),
-    extractFailures: jest.fn().mockResolvedValue(createAggResult('failure')),
-    extractLatency: jest.fn().mockResolvedValue(createAggResult('latency')),
-    extractTimeseries: jest.fn().mockResolvedValue(createAggResult('timeseries')),
-  });
-
-  const createTransformerMock = (): TransformerMock => ({
-    transformPlatformMetrics: jest.fn().mockReturnValue([{ platform: 'web' }]),
-    transformDeviceBreakdown: jest
-      .fn()
-      .mockImplementation((_agg, _ctx, dimension: string) => [{ dimension }]),
-    transformTransportComparison: jest.fn().mockReturnValue([{ transportMode: 'ws' }]),
-    transformSdkVersions: jest.fn().mockReturnValue([{ sdkVersion: '1.0.0' }]),
-    transformFailures: jest.fn().mockReturnValue([{ failureReason: 'timeout' }]),
-    transformLatency: jest.fn().mockReturnValue({ metricType: 'overall' }),
-    transformTimeseries: jest
-      .fn()
-      .mockImplementation((_agg, _ctx, metric: string, interval: string) => [
-        { metric, interval, value: 1 },
-      ]),
-  });
-
-  const createLoaderMock = (): LoaderMock => ({
-    loadPlatformMetrics: jest.fn().mockResolvedValue(undefined),
-    loadDeviceBreakdown: jest.fn().mockResolvedValue(undefined),
-    loadTransportComparison: jest.fn().mockResolvedValue(undefined),
-    loadSdkVersions: jest.fn().mockResolvedValue(undefined),
-    loadFailures: jest.fn().mockResolvedValue(undefined),
-    loadLatency: jest.fn().mockResolvedValue(undefined),
-    loadTimeseries: jest.fn().mockResolvedValue(undefined),
-  });
-
-  const getExponentialBackoff = (delay: number, attemptNumber: number): number =>
-    delay * 2 ** (attemptNumber - 1);
-
-  // Processor no longer throws on timeline failure — it logs error and continues.
-  // BullMQ retry is no longer triggered by processor errors.
-  const runProcessorOnce = async (
-    processor: OverlayMetricsProcessor,
-    job: RetryableJob,
-  ): Promise<RetryOutcome> => {
-    await processor.process(job as Job);
-    return {
-      status: 'completed',
-      attemptsMade: 1,
-      scheduledBackoffs: [],
-    };
-  };
-
-  describe('processor retry flow', () => {
+  describe('KafkaConsumerService retry flow', () => {
     let moduleRef: TestingModule;
-    let processor: OverlayMetricsProcessor;
-    let extractor: ExtractorMock;
-    let transformer: TransformerMock;
-    let loader: LoaderMock;
+    let timelineProcessor: { processTimeline: jest.Mock };
+    let kafkaProducer: { sendToDLQ: jest.Mock };
     let logSpy: jest.SpyInstance;
     let errorSpy: jest.SpyInstance;
 
     beforeEach(async () => {
-      extractor = createExtractorMock();
-      transformer = createTransformerMock();
-      loader = createLoaderMock();
+      timelineProcessor = { processTimeline: jest.fn().mockResolvedValue(undefined) };
+      kafkaProducer = { sendToDLQ: jest.fn().mockResolvedValue(undefined) };
 
       logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
       errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+
+      pauseMock.mockClear();
+      resumeMock.mockClear();
+      commitOffsetsMock.mockClear();
+      connectMock.mockClear();
+      subscribeMock.mockClear();
+      runMock.mockClear();
+      disconnectMock.mockClear();
+      capturedEachMessage = undefined;
 
       moduleRef = await Test.createTestingModule({
         providers: [
-          OverlayMetricsProcessor,
-          { provide: ExtractorService, useValue: extractor },
-          { provide: TransformerService, useValue: transformer },
-          { provide: LoaderService, useValue: loader },
+          KafkaConsumerService,
+          { provide: ConfigService, useValue: createMockConfigService() },
+          { provide: KafkaProducerService, useValue: kafkaProducer },
+          { provide: TimelineProcessorService, useValue: timelineProcessor },
         ],
       }).compile();
 
-      processor = moduleRef.get(OverlayMetricsProcessor);
+      const kafkaConsumerService = moduleRef.get(KafkaConsumerService);
+      await kafkaConsumerService.onModuleInit();
     });
 
     afterEach(async () => {
@@ -166,129 +119,72 @@ describe('UC-11 - Elasticsearch connection error retry', () => {
       jest.restoreAllMocks();
     });
 
-    it('log error và continue khi ES connection error — không retry, job vẫn complete', async () => {
-      errorSpy.mockClear();
-      const connectionError = new errors.ConnectionError('Elasticsearch connection lost');
+    it('first failure (retryCount=0) → pause called, commitOffsets NOT called', async () => {
+      const esError = new Error('Elasticsearch connection lost');
+      timelineProcessor.processTimeline.mockRejectedValueOnce(esError);
 
-      extractor.extractPlatformMetrics.mockRejectedValueOnce(connectionError);
-
-      const result = await runProcessorOnce(processor, createJob());
-
-      expect(result).toEqual({
-        status: 'completed',
-        attemptsMade: 1,
-        scheduledBackoffs: [],
-      });
-      expect(extractor.extractPlatformMetrics).toHaveBeenCalledTimes(1);
-      // Loader not called because platform extraction failed before load
-      expect(loader.loadPlatformMetrics).not.toHaveBeenCalled();
-
-      expect(errorSpy).toHaveBeenCalledTimes(2);
-      expect(errorSpy.mock.calls[0][0]).toContain(
-        'Timeline timeline-es-001 processing failed: Elasticsearch connection lost',
-      );
-      expect(errorSpy.mock.calls[1][0]).toContain(
-        'Target match-es-001 / Timeline timeline-es-001 failed: Elasticsearch connection lost',
-      );
-
-      // Other extractors not called because processor stopped at platform failure
-      expect(extractor.extractDeviceBreakdown).not.toHaveBeenCalled();
-      expect(extractor.extractTransportComparison).not.toHaveBeenCalled();
-    });
-
-    it('job vẫn complete ngay cả khi ES lỗi liên tục — không có retry', async () => {
-      errorSpy.mockClear();
-      extractor.extractPlatformMetrics.mockRejectedValue(
-        new errors.ConnectionError('Elasticsearch cluster unavailable'),
-      );
-
-      const result = await runProcessorOnce(processor, createJob());
-
-      expect(result.status).toBe('completed');
-      expect(result.attemptsMade).toBe(1);
-      expect(extractor.extractPlatformMetrics).toHaveBeenCalledTimes(1);
-      expect(loader.loadPlatformMetrics).not.toHaveBeenCalled();
-      expect(errorSpy).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  describe('scheduler retry policy', () => {
-    let moduleRef: TestingModule;
-    let queueMock: { upsertJobScheduler: jest.Mock };
-    let schedulerConfigMock: { getActiveTargets: jest.Mock };
-
-    beforeEach(async () => {
-      queueMock = {
-        upsertJobScheduler: jest.fn().mockResolvedValue(undefined),
-      };
-
-      schedulerConfigMock = {
-        getActiveTargets: jest.fn().mockResolvedValue([
-          {
-            tenantId: jobData.tenantId,
-            matchId: jobData.matchId,
-            timelineIds: jobData.timelineIds,
-            enabled: true,
-          },
-        ]),
-      };
-
-      moduleRef = await Test.createTestingModule({
-        providers: [
-          SchedulerService,
-          {
-            provide: getQueueToken(OVERLAY_METRICS_QUEUE),
-            useValue: queueMock,
-          },
-          {
-            provide: SchedulerConfigService,
-            useValue: schedulerConfigMock,
-          },
-        ],
-      }).compile();
-    });
-
-    afterEach(async () => {
-      await moduleRef.close();
-      jest.restoreAllMocks();
-    });
-
-    it('đăng ký BullMQ job với attempts=3 và exponential backoff base 5 giây', async () => {
-      const scheduler = moduleRef.get(SchedulerService);
-
-      await scheduler.onModuleInit();
-
-      expect(queueMock.upsertJobScheduler).toHaveBeenCalledTimes(1);
-      expect(queueMock.upsertJobScheduler).toHaveBeenCalledWith(
-        OVERLAY_METRICS_SCHEDULER_ID,
-        { every: 60 * 60 * 1000 },
-        {
-          name: OVERLAY_METRICS_JOB,
-          data: {
-            timeRangeMinutes: 60,
-            targets: [
-              {
-                tenantId: jobData.tenantId,
-                matchId: jobData.matchId,
-                timelineIds: jobData.timelineIds,
-                enabled: true,
-              },
-            ],
-          },
-          opts: {
-            attempts: 3,
-            backoff: { type: 'exponential', delay: 5000 },
-          },
+      expect(capturedEachMessage).toBeDefined();
+      await capturedEachMessage!({
+        topic: 'overlay-metrics.etl.jobs',
+        partition: 0,
+        message: {
+          offset: '100',
+          value: Buffer.from(JSON.stringify(createPayload({ retryCount: 0 }))),
+          key: null,
         },
-      );
+      });
 
-      expect([
-        getExponentialBackoff(jobOpts.backoff.delay, 1),
-        getExponentialBackoff(jobOpts.backoff.delay, 2),
-        getExponentialBackoff(jobOpts.backoff.delay, 3),
-      ]).toEqual([5000, 10000, 20000]);
-      expect(intervalFrom.toISOString()).toBe('2026-05-13T10:00:00.000Z');
-      expect(intervalTo.toISOString()).toBe('2026-05-13T10:05:00.000Z');
+      expect(pauseMock).toHaveBeenCalledWith([
+        { topic: 'overlay-metrics.etl.jobs', partitions: [0] },
+      ]);
+      expect(commitOffsetsMock).not.toHaveBeenCalled();
+      expect(kafkaProducer.sendToDLQ).not.toHaveBeenCalled();
+    }, 15000);
+
+    it('second failure (retryCount=1) → pause called again, commitOffsets NOT called', async () => {
+      const esError = new Error('Elasticsearch cluster unavailable');
+      timelineProcessor.processTimeline.mockRejectedValueOnce(esError);
+
+      await capturedEachMessage!({
+        topic: 'overlay-metrics.etl.jobs',
+        partition: 0,
+        message: {
+          offset: '101',
+          value: Buffer.from(JSON.stringify(createPayload({ retryCount: 1 }))),
+          key: null,
+        },
+      });
+
+      expect(pauseMock).toHaveBeenCalledWith([
+        { topic: 'overlay-metrics.etl.jobs', partitions: [0] },
+      ]);
+      expect(commitOffsetsMock).not.toHaveBeenCalled();
+      expect(kafkaProducer.sendToDLQ).not.toHaveBeenCalled();
+    }, 15000);
+
+    it('third failure (retryCount=3 >= maxRetries) → sendToDLQ called, commitOffsets called', async () => {
+      const esError = new Error('Elasticsearch cluster unavailable');
+      timelineProcessor.processTimeline.mockRejectedValueOnce(esError);
+
+      await capturedEachMessage!({
+        topic: 'overlay-metrics.etl.jobs',
+        partition: 0,
+        message: {
+          offset: '102',
+          value: Buffer.from(JSON.stringify(createPayload({ retryCount: 3 }))),
+          key: null,
+        },
+      });
+
+      expect(kafkaProducer.sendToDLQ).toHaveBeenCalledTimes(1);
+      expect(kafkaProducer.sendToDLQ).toHaveBeenCalledWith(
+        expect.objectContaining({ timelineId, tenantId, matchId }),
+        esError,
+      );
+      expect(commitOffsetsMock).toHaveBeenCalledWith([
+        { topic: 'overlay-metrics.etl.jobs', partition: 0, offset: '103' },
+      ]);
+      expect(pauseMock).not.toHaveBeenCalled();
     });
   });
 });

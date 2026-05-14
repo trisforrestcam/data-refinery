@@ -7,11 +7,11 @@ ETL pipeline NestJS pre-aggregate tracking events từ Elasticsearch (`tracking-
 | Thành phần | Phiên bản / Package |
 |---|---|
 | Framework | NestJS 11 |
-| Task Queue | BullMQ 5 (`upsertJobScheduler`) |
+| Task Queue | Apache Kafka (`kafkajs`) |
 | Database | MongoDB + Mongoose 9 |
 | Search | Elasticsearch 9 (`@elastic/elasticsearch`) |
 | ES Integration | `@nestjs/elasticsearch` (global module) |
-| Queue Backend | Redis (ioredis) |
+| Queue Backend | Apache Kafka |
 | Validation | class-validator 0.15+, class-transformer 0.5+ |
 | Language | TypeScript 5.7+ |
 | Testing | Jest 30 |
@@ -19,13 +19,15 @@ ETL pipeline NestJS pre-aggregate tracking events từ Elasticsearch (`tracking-
 
 ## Architecture
 
-### ETL Pipeline (mỗi 5 phút)
+### ETL Pipeline (mỗi giờ)
 ```
-Scheduler (BullMQ)
-  → Processor (WorkerHost)
-    → Extractor (ES aggregations)
-      → Transformer (DTOs + derived metrics)
-        → Loader → Repository → MongoDB
+Cron Scheduler (@nestjs/schedule)
+  → Kafka Producer
+    → Kafka Topic (overlay-metrics.etl.jobs)
+      → Kafka Consumer (TimelineProcessor)
+        → Extractor (ES aggregations)
+          → Transformer (DTOs + derived metrics)
+            → Loader → Repository → MongoDB
 ```
 
 ### Read API (on-demand)
@@ -47,7 +49,7 @@ src/
 ├── app.module.ts                    # Wire up Config, Mongoose, Bull, ES, ETL, API
 ├── config/                          # registerAs configs
 ├── common/
-│   ├── constants/                   # BullMQ queue/job constants
+│   ├── constants/                   # Kafka topic constants
 │   ├── guards/
 │   │   └── internal-api.guard.ts   # Server-to-server auth
 │   ├── interfaces/
@@ -70,7 +72,7 @@ src/
     │   ├── extractor/
     │   ├── transformer/
     │   ├── loader/
-    │   └── scheduler/
+    │   └── kafka/
     └── overlay-metrics-api/         # Domain feature: Read API
         ├── api.module.ts
         ├── metrics.controller.ts    # GET /metrics/* (Swagger + InternalApiGuard)
@@ -98,10 +100,13 @@ src/
 NODE_ENV=development
 PORT=5001
 
-# Redis (BullMQ)
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=
+# Kafka
+KAFKA_BROKERS=localhost:9092
+KAFKA_CLIENT_ID=data-refinery
+KAFKA_GROUP_ID=data-refinery-etl-consumers
+KAFKA_DLQ_TOPIC=overlay-metrics.etl.dlq
+KAFKA_MAX_RETRIES=3
+KAFKA_RETRY_DELAY_MS=5000
 
 # MongoDB
 MONGODB_URI=mongodb://localhost:27017/datarefinery
@@ -129,7 +134,7 @@ TZ=Asia/Ho_Chi_Minh
 ## Conventions
 
 - **Config:** `registerAs` + `forRootAsync`, không hardcode credentials.
-- **BullMQ:** `upsertJobScheduler`; processor extends `WorkerHost`.
+- **Kafka:** Cron `@nestjs/schedule` + raw `kafkajs` consumer với manual commit, retry pause/resume, DLQ.
 - **Domain Layer:** Schemas + DTOs + enums ở `domain/`, dùng chung bởi ETL và API.
 - **Repository Pattern:** `OverlayMetricsRepository` centralize persistence. Loader và API đều delegate.
 - **Elasticsearch:** Query flat (không `body` wrapper vì ES client v9).
@@ -137,7 +142,7 @@ TZ=Asia/Ho_Chi_Minh
 - **Bulk Operations:** `bulkWrite(updateOne + upsert)` cho idempotency.
 - **Validation:** Global `ValidationPipe` — `whitelist`, `forbidNonWhitelisted`, `transform`.
 - **Auth:** `InternalApiGuard` kiểm tra `x-internal-api-key` header cho server-to-server calls.
-- **Error Handling:** Log + throw để BullMQ retry.
+- **Error Handling:** Log + throw để Kafka consumer retry hoặc DLQ.
 
 ## Scripts
 

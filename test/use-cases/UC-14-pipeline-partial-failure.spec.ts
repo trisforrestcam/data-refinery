@@ -1,10 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import type { Job } from 'bullmq';
-import { OVERLAY_METRICS_JOB } from '@common/constants/scheduler.constants';
 import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extractor.service';
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
-import { OverlayMetricsProcessor } from '@modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
+import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
 import type { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transform-context.interface';
 
@@ -52,13 +50,13 @@ type MongoState = {
 
 type ScenarioContext = {
   moduleRef: TestingModule;
-  processor: OverlayMetricsProcessor;
+  timelineProcessor: TimelineProcessorService;
   extractor: ExtractorMock;
   loader: LoaderMock;
   mongoState: MongoState;
 };
 
-describe('UC-14 - Pipeline partial failure: log error và continue, không retry cả job', () => {
+describe('UC-14 - Pipeline partial failure: log error và throw để consumer retry/DLQ', () => {
   const intervalFrom = new Date('2026-05-13T10:00:00.000Z');
   const intervalTo = new Date('2026-05-13T10:05:00.000Z');
   const timelineId = 'timeline-partial-001';
@@ -73,20 +71,14 @@ describe('UC-14 - Pipeline partial failure: log error và continue, không retry
     aggregations: { name },
   });
 
-  const buildJob = (id: string): Job =>
-    ({
-      id,
-      name: OVERLAY_METRICS_JOB,
-      timestamp: Date.parse('2026-05-13T10:05:00.000Z'),
-      data: {
-        timeRangeMinutes: 5,
-        timelineIds: [timelineId],
-        tenantId,
-        matchId,
-        intervalFrom,
-        intervalTo,
-      },
-    }) as Job;
+  const buildPayload = () => ({
+    tenantId,
+    matchId,
+    timelineId,
+    timeRangeMinutes: 5,
+    intervalFrom: intervalFrom.toISOString(),
+    intervalTo: intervalTo.toISOString(),
+  });
 
   const createMongoState = (): MongoState => ({
     platform: [],
@@ -256,7 +248,7 @@ describe('UC-14 - Pipeline partial failure: log error và continue, không retry
 
     const moduleRef = await Test.createTestingModule({
       providers: [
-        OverlayMetricsProcessor,
+        TimelineProcessorService,
         { provide: ExtractorService, useValue: extractor },
         { provide: TransformerService, useValue: transformer },
         { provide: LoaderService, useValue: loader },
@@ -265,7 +257,7 @@ describe('UC-14 - Pipeline partial failure: log error và continue, không retry
 
     return {
       moduleRef,
-      processor: moduleRef.get(OverlayMetricsProcessor),
+      timelineProcessor: moduleRef.get(TimelineProcessorService),
       extractor,
       loader,
       mongoState,
@@ -287,11 +279,11 @@ describe('UC-14 - Pipeline partial failure: log error và continue, không retry
     jest.restoreAllMocks();
   });
 
-  it('giữ data của steps 1-3 và dừng steps 5-7 khi step 4 SDK fail, job vẫn resolve', async () => {
+  it('giữ data của steps 1-3 và dừng steps 5-7 khi step 4 SDK fail, throw để consumer retry', async () => {
     const ctx = await setupScenario('sdk');
 
-    // Processor no longer throws — it logs error and continues
-    await expect(ctx.processor.process(buildJob('job-uc-14-sdk'))).resolves.toBeUndefined();
+    // TimelineProcessorService throw ngay khi pipeline step fail để Kafka consumer xử lý retry/DLQ
+    await expect(ctx.timelineProcessor.processTimeline(buildPayload())).rejects.toThrow('Step 4 (SDK) extractor failed');
 
     expect(ctx.loader.loadPlatformMetrics).toHaveBeenCalledTimes(1);
     expect(ctx.loader.loadDeviceBreakdown).toHaveBeenCalledTimes(3);
@@ -311,17 +303,14 @@ describe('UC-14 - Pipeline partial failure: log error và continue, không retry
     expect(ctx.mongoState.timeseries).toHaveLength(0);
 
     expect(lastErrorMessage()).toContain('Step 4 (SDK) extractor failed');
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('completed with 1 failed timelines'),
-    );
 
     await ctx.moduleRef.close();
   });
 
-  it('fail ở step 2 Device thì chỉ step 1 đã commit, job vẫn resolve', async () => {
+  it('fail ở step 2 Device thì chỉ step 1 đã commit, throw để consumer retry', async () => {
     const ctx = await setupScenario('device');
 
-    await expect(ctx.processor.process(buildJob('job-uc-14-device'))).resolves.toBeUndefined();
+    await expect(ctx.timelineProcessor.processTimeline(buildPayload())).rejects.toThrow('Step 2 (Device) extractor failed');
 
     expect(ctx.loader.loadPlatformMetrics).toHaveBeenCalledTimes(1);
     expect(ctx.loader.loadDeviceBreakdown).not.toHaveBeenCalled();
@@ -351,10 +340,10 @@ describe('UC-14 - Pipeline partial failure: log error và continue, không retry
     await ctx.moduleRef.close();
   });
 
-  it('fail ở step 7 Timeseries cuối thì data các step trước vẫn giữ nguyên, job resolve', async () => {
+  it('fail ở step 7 Timeseries cuối thì data các step trước vẫn giữ nguyên, throw để consumer retry', async () => {
     const ctx = await setupScenario('timeseries');
 
-    await expect(ctx.processor.process(buildJob('job-uc-14-timeseries'))).resolves.toBeUndefined();
+    await expect(ctx.timelineProcessor.processTimeline(buildPayload())).rejects.toThrow('Step 7 (Timeseries) extractor failed at avgRenderMs');
 
     expect(ctx.loader.loadPlatformMetrics).toHaveBeenCalledTimes(1);
     expect(ctx.loader.loadDeviceBreakdown).toHaveBeenCalledTimes(3);

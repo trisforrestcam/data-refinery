@@ -1,12 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import type { Job } from 'bullmq';
 import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extractor.service';
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
-import { OverlayMetricsProcessor } from '@modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
+import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
 import type { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transform-context.interface';
-import { OVERLAY_METRICS_JOB } from '@common/constants/scheduler.constants';
 
 type ExtractorMethod =
   | 'extractPlatformMetrics'
@@ -41,7 +39,7 @@ type LoaderMock = Record<LoaderMethod, jest.Mock>;
 
 describe('UC-01 - Full ETL pipeline cho 1 trận đấu live', () => {
   let moduleRef: TestingModule;
-  let processor: OverlayMetricsProcessor;
+  let timelineProcessor: TimelineProcessorService;
   let extractor: ExtractorMock;
   let transformer: TransformerMock;
   let loader: LoaderMock;
@@ -63,18 +61,12 @@ describe('UC-01 - Full ETL pipeline cho 1 trận đấu live', () => {
     from: expectedIntervalFrom,
     to: expectedIntervalTo,
   };
-  const jobData = {
-    timeRangeMinutes: 5,
-    timelineIds: ['tl-001'],
+  const payload = {
     tenantId: 'tenant-abc',
     matchId: 'match-123',
+    timelineId: 'tl-001',
+    timeRangeMinutes: 5,
   };
-  const liveMatchJob = {
-    id: 'job-uc-01',
-    name: OVERLAY_METRICS_JOB,
-    data: jobData,
-    timestamp: fixedNow.getTime(),
-  } as Job;
 
   const aggResult = (name: string) => ({
     aggregations: {
@@ -149,14 +141,14 @@ describe('UC-01 - Full ETL pipeline cho 1 trận đấu live', () => {
 
     moduleRef = await Test.createTestingModule({
       providers: [
-        OverlayMetricsProcessor,
+        TimelineProcessorService,
         { provide: ExtractorService, useValue: extractor },
         { provide: TransformerService, useValue: transformer },
         { provide: LoaderService, useValue: loader },
       ],
     }).compile();
 
-    processor = moduleRef.get(OverlayMetricsProcessor);
+    timelineProcessor = moduleRef.get(TimelineProcessorService);
     logSpy.mockClear();
   });
 
@@ -168,7 +160,7 @@ describe('UC-01 - Full ETL pipeline cho 1 trận đấu live', () => {
 
   it('chạy đủ pipeline ETL tổng thể cho 1 timeline của trận live với đúng 13 lượt extract-transform-load', async () => {
     // Nghiệp vụ: 1 job extract-transform-load-metrics xử lý đủ 13 nhánh dữ liệu overlay cho trận live.
-    await processor.process(liveMatchJob);
+    await timelineProcessor.processTimeline(payload);
 
     expect(totalCalls(extractor)).toBe(13);
     expect(totalCalls(transformer)).toBe(13);
@@ -190,7 +182,7 @@ describe('UC-01 - Full ETL pipeline cho 1 trận đấu live', () => {
 
   it('tạo TrackingAggQuery và TransformContext đúng theo tenant, match, timeline và cửa sổ 5 phút', async () => {
     // Nghiệp vụ: dữ liệu của trận live chỉ được aggregate trong cửa sổ [now - 5 phút, now].
-    await processor.process(liveMatchJob);
+    await timelineProcessor.processTimeline(payload);
 
     expect(extractor.extractPlatformMetrics).toHaveBeenCalledWith(expectedQuery);
     expect(extractor.extractDeviceBreakdown).toHaveBeenNthCalledWith(
@@ -209,7 +201,7 @@ describe('UC-01 - Full ETL pipeline cho 1 trận đấu live', () => {
 
   it('load latency với metricType overall để lưu bản ghi percentile tổng thể của trận live', async () => {
     // Nghiệp vụ: bước latency ghi 1 record tổng thể trước khi loader upsert vào MongoDB.
-    await processor.process(liveMatchJob);
+    await timelineProcessor.processTimeline(payload);
 
     expect(transformer.transformLatency).toHaveBeenCalledWith(
       aggResult('latency').aggregations,
@@ -223,7 +215,7 @@ describe('UC-01 - Full ETL pipeline cho 1 trận đấu live', () => {
 
   it('lặp timeseries qua 5 metric nghiệp vụ với interval 5m', async () => {
     // Nghiệp vụ: timeseries phải có đủ sent, received, rendered, failed và avgRenderMs cho biểu đồ 5 phút.
-    await processor.process(liveMatchJob);
+    await timelineProcessor.processTimeline(payload);
 
     const metrics = ['sent', 'received', 'rendered', 'failed', 'avgRenderMs'];
 
@@ -249,10 +241,9 @@ describe('UC-01 - Full ETL pipeline cho 1 trận đấu live', () => {
 
   it('ghi log đúng format cho từng bước ETL của timeline', async () => {
     // Nghiệp vụ: operator cần log đầy đủ từng bước để theo dõi ETL của timeline trong trận live.
-    await processor.process(liveMatchJob);
+    await timelineProcessor.processTimeline(payload);
 
     expect(logSpy.mock.calls.map((call) => call[0])).toEqual([
-      'Processing job job-uc-01',
       'Timeline tl-001 - Platform metrics: 1 items',
       'Timeline tl-001 - Device breakdown (browser): 1 items',
       'Timeline tl-001 - Device breakdown (os): 1 items',
@@ -266,7 +257,6 @@ describe('UC-01 - Full ETL pipeline cho 1 trận đấu live', () => {
       'Timeline tl-001 - Timeseries (rendered): 1 items',
       'Timeline tl-001 - Timeseries (failed): 1 items',
       'Timeline tl-001 - Timeseries (avgRenderMs): 1 items',
-      'Job job-uc-01 completed',
     ]);
   });
 });

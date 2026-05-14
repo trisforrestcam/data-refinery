@@ -108,12 +108,13 @@ src/
     │   ├── loader/
     │   │   ├── loader.module.ts
     │   │   └── loader.service.ts           # 7 load* methods, tenantId param, delegate to OverlayMetricsRepository.upsert()
-    │   └── scheduler/
-    │       ├── scheduler.module.ts
-    │       ├── scheduler.service.ts        # OnModuleInit, upsertJobScheduler every 1h, reads targets from DB or env vars
-    │       └── scheduler-config.service.ts # Quản lý scheduler targets từ MongoDB, fallback env vars
-    │       └── processors/
-    │           └── overlay-metrics.processor.ts  # WorkerHost, validateJobData, resolveInterval, processTimeline
+    │   └── kafka/
+    │       ├── kafka.module.ts              # Aggregates ExtractorModule, TransformerModule, LoaderModule, Kafka services
+    │       ├── kafka-producer.service.ts    # KafkaJS producer, sendJob / sendToDLQ
+    │       ├── kafka-consumer.service.ts    # Raw KafkaJS consumer, manual commit, retry pause/resume, DLQ
+    │       ├── job-producer.service.ts      # @Cron('0 * * * *'), reads targets, produces 1 message / timeline
+    │       ├── timeline-processor.service.ts # 7-step ETL pipeline per timeline
+    │       └── scheduler-config.service.ts  # Quản lý scheduler targets từ MongoDB
     ├── overlay-metrics-api/    # Domain feature: Read API
     │   ├── api.module.ts              # Imports PersistenceModule, provides controller + service
     │   ├── metrics-api.module.ts      # Alternative: imports MongooseModule.forFeature directly
@@ -129,7 +130,7 @@ src/
 
 ## Conventions
 1. **Config:** `registerAs` + `forRootAsync`, dùng helper `parseIntOrDefault` để parse số an toàn. Không hardcode credentials.
-2. **BullMQ:** `upsertJobScheduler`; processor extends `WorkerHost`, route bằng `job.name`. Retry: `attempts: 3`, `backoff: { type: 'exponential', delay: 5000 }`.
+2. **Kafka:** `@nestjs/schedule` `@Cron('0 * * * *')` trigger `JobProducerService` để produce message vào topic `overlay-metrics.etl.jobs`. `KafkaConsumerService` (raw KafkaJS) xử lý message với `autoCommit: false`, retry qua `consumer.pause/resume` + exponential sleep, DLQ sau `maxRetries`. Config: `KAFKA_MAX_RETRIES=3`, `KAFKA_RETRY_DELAY_MS=5000`.
 3. **Domain Layer:** Schemas + DTOs + enums ở `domain/`, dùng chung bởi ETL và API.
 4. **Repository Pattern:** `OverlayMetricsRepository` centralize persistence. Loader và API đều delegate. BaseRepository<T> cung cấp CRUD cơ bản.
 5. **MongoDB:** `@Schema({ timestamps: true })` + `@Prop({ required: true })`, persistence qua Repository (không `@InjectModel` trực tiếp trong Loader/API). Multi-tenant: `TenantConnectionManager` cache connection, `TenantModelFactory` tạo model động.
@@ -138,7 +139,7 @@ src/
 8. **Bulk Operations:** Repository dùng `bulkWrite(updateOne + upsert)` với `$inc` (accumulate fields), `$set` (overwrite fields), `$setOnInsert` (createdAt), `$currentDate` (updatedAt) — idempotency.
 9. **Validation:** Global `ValidationPipe` trong `main.ts` — `whitelist`, `forbidNonWhitelisted`, `transform`.
 10. **Auth:** `InternalApiGuard` kiểm tra `x-internal-api-key` header cho server-to-server calls. Đọc `process.env.INTERNAL_API_KEY` trực tiếp.
-11. **Error Handling:** Log + throw để BullMQ retry theo config backoff.
+11. **Error Handling:** Log + throw để Kafka consumer retry hoặc DLQ.
 12. **API Endpoints:** 
     - `overlay-metrics-api`: 7 GET endpoints dưới `@Controller('metrics')`, nhận `x-tenant-id` header (required) và `MetricsQueryDto` query params.
     - `tenant-management`: 1 POST endpoint (`tenant-management/refresh-cache`) dưới `@Controller('tenant-management')`, bảo vệ bởi `InternalApiGuard`. Dùng để reload active tenants từ DB gốc khi có thay đổi cấu hình.
@@ -149,9 +150,9 @@ src/
 ## Important Notes
 - `.env.example` định nghĩa `TRACKING_ES_INDEX`, `ELASTIC_APM_ENVIRONMENT`, và `INTERNAL_API_KEY`.
 - Scheduler cần targets từ DB (`scheduler_targets` collection, `enabled: true`). Targets được validate qua `TenantCacheService` (chỉ giữ tenants đang active). Nếu có `OVERLAY_METRICS_TENANT_ID` env var, chỉ chạy targets của tenant đó. Nếu không có targets nào → log warning, không đăng ký scheduler.
-- Processor chạy job `extract-transform-load-metrics` mỗi 1 giờ (`every: 3600000`, `timeRangeMinutes: 60`).
+- `JobProducerService.handleCron()` chạy mỗi giờ (`@Cron('0 * * * *')`), produce message vào topic `overlay-metrics.etl.jobs` với `timeRangeMinutes: 60`. Mỗi timeline là 1 message riêng biệt.
 - ES index pattern: `tracking-events-*`. Có thêm `apmIndex: 'traces-apm-*'` trong config.
-- `resolveInterval` logic: ưu tiên explicit `intervalFrom`/`intervalTo` từ job data (hỗ trợ backfill). Nếu không có, tính từ `job.timestamp + delay`, round xuống bội số của intervalMs.
+- `resolveInterval` logic: ưu tiên explicit `intervalFrom`/`intervalTo` từ payload (hỗ trợ backfill). Nếu không có, tính từ `new Date()`, round xuống bội số của `timeRangeMinutes`.
 - Loader delegate persistence cho `OverlayMetricsRepository` (không dùng `@InjectModel` inline). Mỗi method nhận `tenantId` làm first param.
 - Multi-tenant: `TenantConnectionManager` cache MongoDB connection per tenant. `TenantModelFactory` tạo Mongoose Model động trên tenant connection. `TenantCacheService` load active tenants từ DB gốc vào Map khi bootstrap.
 - `TenantCacheModule` là `@Global` — mọi module có thể inject `TenantCacheService` mà không cần import.
@@ -172,7 +173,7 @@ src/
 - Enums: `src/domain/enums/`
 - Interfaces: `src/domain/interfaces/`
 - ES queries: `src/modules/overlay-metrics-etl/extractor/elasticsearch/tracking-es.service.ts`
-- Processor flow: `src/modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor.ts`
+- Processor flow: `src/modules/overlay-metrics-etl/kafka/timeline-processor.service.ts`
 - Repository: `src/infrastructure/persistence/overlay-metrics.repository.ts`
 - Tenant connection: `src/infrastructure/persistence/tenant-connection.manager.ts`
 - Tenant model factory: `src/infrastructure/persistence/tenant-model.factory.ts`

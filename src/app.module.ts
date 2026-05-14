@@ -1,13 +1,12 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
-import { BullModule } from '@nestjs/bullmq';
-import Redis from 'ioredis';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ElasticsearchCoreModule } from '@common/modules/elasticsearch-core.module';
 import { TenantCacheModule } from '@common/modules/tenant-cache/tenant-cache.module';
 import appConfig from '@config/app.config';
 import mongoConfig from '@config/mongo.config';
-import redisConfig from '@config/redis.config';
+import kafkaConfig from '@config/kafka.config';
 import elasticsearchConfig from '@config/elasticsearch.config';
 import { EtlModule } from '@modules/overlay-metrics-etl/etl.module';
 import { ApiModule } from '@modules/overlay-metrics-api/api.module';
@@ -17,7 +16,7 @@ import { TenantManagementModule } from '@modules/tenant-management/tenant-manage
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, mongoConfig, redisConfig, elasticsearchConfig],
+      load: [appConfig, mongoConfig, kafkaConfig, elasticsearchConfig],
     }),
     MongooseModule.forRootAsync({
       inject: [ConfigService],
@@ -25,36 +24,7 @@ import { TenantManagementModule } from '@modules/tenant-management/tenant-manage
         uri: configService.get<string>('mongo.uri'),
       }),
     }),
-    BullModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => {
-        const isCluster = configService.get<boolean>('redis.isCluster');
-
-        if (isCluster) {
-          const nodes = configService.get<
-            { host: string; port: number }[]
-          >('redis.clusterNodes')!;
-          const password =
-            configService.get<string>('redis.password') || undefined;
-          return {
-            connection: new Redis.Cluster(nodes, {
-              redisOptions: {
-                password,
-                maxRetriesPerRequest: null,
-              },
-            }),
-          };
-        }
-
-        return {
-          connection: {
-            host: configService.get<string>('redis.host'),
-            port: configService.get<number>('redis.port'),
-            password: configService.get<string>('redis.password') || undefined,
-          },
-        };
-      },
-    }),
+    ScheduleModule.forRoot(),
     ElasticsearchCoreModule,
     TenantCacheModule,
     EtlModule,

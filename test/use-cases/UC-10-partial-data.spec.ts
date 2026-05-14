@@ -1,6 +1,5 @@
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import type { Job } from 'bullmq';
 import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extractor.service';
 import { TrackingEsService } from '@modules/overlay-metrics-etl/extractor/elasticsearch/tracking-es.service';
 import type {
@@ -13,10 +12,9 @@ import type {
   TransportComparisonAggs,
 } from '@modules/overlay-metrics-etl/extractor/elasticsearch/types/tracking-es-aggs.types';
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
-import { OverlayMetricsProcessor } from '@modules/overlay-metrics-etl/scheduler/processors/overlay-metrics.processor';
+import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
 import type { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transform-context.interface';
-import { OVERLAY_METRICS_JOB } from '@common/constants/scheduler.constants';
 
 type TrackingEsMock = Record<
   | 'queryPlatformMetrics'
@@ -498,28 +496,25 @@ describe('UC-10 - ES partial data nhưng ETL vẫn hoàn thành', () => {
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
-        OverlayMetricsProcessor,
+        TimelineProcessorService,
         ExtractorService,
         TransformerService,
         { provide: TrackingEsService, useValue: trackingEsMock },
         { provide: LoaderService, useValue: loaderMock },
       ],
     }).compile();
-    const processor = moduleRef.get(OverlayMetricsProcessor);
+    const timelineProcessor = moduleRef.get(TimelineProcessorService);
 
-    const job = {
-      id: 'job-partial-data',
-      name: OVERLAY_METRICS_JOB,
-      timestamp: Date.parse('2026-05-13T10:07:30.000Z'),
-      data: {
-        timeRangeMinutes: 5,
-        timelineIds: [ctx.timelineId],
-        tenantId: ctx.tenantId,
-        matchId: ctx.matchId,
-      },
-    } as Job;
+    const payload = {
+      tenantId: ctx.tenantId,
+      matchId: ctx.matchId,
+      timelineId: ctx.timelineId,
+      timeRangeMinutes: 5,
+      intervalFrom: intervalFrom.toISOString(),
+      intervalTo: intervalTo.toISOString(),
+    };
 
-    await expect(processor.process(job)).resolves.toBeUndefined();
+    await expect(timelineProcessor.processTimeline(payload)).resolves.toBeUndefined();
 
     expect(errorSpy).not.toHaveBeenCalled();
 
