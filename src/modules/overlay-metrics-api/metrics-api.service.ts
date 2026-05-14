@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common';
+import { Queue } from 'bullmq';
+import { InjectQueue } from '@nestjs/bullmq';
 import { OverlayMetricsRepository } from '@infrastructure/persistence/overlay-metrics.repository';
 import { MetricType } from '@domain/enums/metric-type.enum';
 import { MetricsQueryDto } from './dto/metrics-query.dto';
+import { BackfillJobDto } from './dto/backfill-job.dto';
+import {
+  OVERLAY_METRICS_QUEUE,
+  OVERLAY_METRICS_JOB,
+} from '@common/constants/scheduler.constants';
 
 /**
  * Build MongoDB filter từ query params + tenantId.
@@ -37,7 +44,11 @@ function buildFilter(
  */
 @Injectable()
 export class MetricsApiService {
-  constructor(private readonly repository: OverlayMetricsRepository) {}
+  constructor(
+    private readonly repository: OverlayMetricsRepository,
+    @InjectQueue(OVERLAY_METRICS_QUEUE)
+    private readonly queue: Queue,
+  ) {}
 
   /**
    * Lấy platform metrics: tỷ lệ nhận, render, lỗi theo platform.
@@ -98,5 +109,40 @@ export class MetricsApiService {
       filter.metric = metric;
     }
     return this.repository.find(MetricType.TIMESERIES, filter);
+  }
+
+  /**
+   * Enqueue backfill job vào BullMQ queue để tính lại metrics cho match cụ thể.
+   * Job sẽ được processor xử lý async — accumulate data thay vì ghi đè.
+   */
+  async triggerBackfill(tenantId: string, dto: BackfillJobDto) {
+    const jobData = {
+      name: OVERLAY_METRICS_JOB,
+      data: {
+        tenantId: dto.tenantId || tenantId,
+        matchId: dto.matchId,
+        timelineIds: dto.timelineIds,
+        timeRangeMinutes: dto.timeRangeMinutes ?? 5,
+        ...(dto.intervalFrom ? { intervalFrom: dto.intervalFrom } : {}),
+        ...(dto.intervalTo ? { intervalTo: dto.intervalTo } : {}),
+      },
+      opts: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+      },
+    };
+
+    const job = await this.queue.add(jobData.name, jobData.data, jobData.opts);
+
+    return {
+      jobId: job.id,
+      status: 'enqueued',
+      tenantId: dto.tenantId || tenantId,
+      matchId: dto.matchId,
+      timelineIds: dto.timelineIds,
+      intervalFrom: dto.intervalFrom,
+      intervalTo: dto.intervalTo,
+      timeRangeMinutes: dto.timeRangeMinutes ?? 5,
+    };
   }
 }

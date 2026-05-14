@@ -1,6 +1,7 @@
-import { Controller, Get, Headers, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Headers, Query, Body, UseGuards } from '@nestjs/common';
 import { MetricsApiService } from './metrics-api.service';
 import { MetricsQueryDto } from './dto/metrics-query.dto';
+import { BackfillJobDto } from './dto/backfill-job.dto';
 import { InternalApiGuard } from '@common/guards/internal-api.guard';
 import {
   ApiTags,
@@ -142,5 +143,21 @@ export class MetricsApiController {
     @Query('metric') metric?: string,
   ) {
     return this.metricsApiService.getTimeseries(tenantId, query, metric);
+  }
+
+  /**
+   * Trigger backfill/recalculate cho match cụ thể.
+   * Dùng khi cần tính lại dữ liệu cho match chưa tính xong hoặc data chưa phải mới nhất.
+   * Enqueue job vào BullMQ queue để processor xử lý async.
+   */
+  @Post('backfill')
+  @ApiOperation({ summary: 'Trigger backfill/recalculate for a match' })
+  @ApiResponse({ status: 202, description: 'Job enqueued successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  async backfill(
+    @Headers('x-tenant-id') tenantId: string,
+    @Body() dto: BackfillJobDto,
+  ) {
+    return this.metricsApiService.triggerBackfill(tenantId, dto);
   }
 }
