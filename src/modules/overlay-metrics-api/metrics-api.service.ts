@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
 import { OverlayMetricsRepository } from '@infrastructure/persistence/overlay-metrics.repository';
+import { SchedulerConfigService } from '@modules/overlay-metrics-etl/scheduler/scheduler-config.service';
 import { MetricType } from '@domain/enums/metric-type.enum';
 import { MetricsQueryDto } from './dto/metrics-query.dto';
 import { BackfillJobDto } from './dto/backfill-job.dto';
+import { SchedulerTargetDto } from './dto/scheduler-target.dto';
 import {
   OVERLAY_METRICS_QUEUE,
   OVERLAY_METRICS_JOB,
@@ -44,10 +46,13 @@ function buildFilter(
  */
 @Injectable()
 export class MetricsApiService {
+  private readonly logger = new Logger(MetricsApiService.name);
+
   constructor(
     private readonly repository: OverlayMetricsRepository,
     @InjectQueue(OVERLAY_METRICS_QUEUE)
     private readonly queue: Queue,
+    private readonly schedulerConfig: SchedulerConfigService,
   ) {}
 
   /**
@@ -144,5 +149,34 @@ export class MetricsApiService {
       intervalTo: dto.intervalTo,
       timeRangeMinutes: dto.timeRangeMinutes ?? 5,
     };
+  }
+
+  /**
+   * Lấy danh sách scheduler targets đang active.
+   */
+  async getSchedulerTargets(tenantId: string) {
+    const targets = await this.schedulerConfig.getActiveTargets();
+    return targets.filter((t) => t.tenantId === tenantId);
+  }
+
+  /**
+   * Thêm hoặc cập nhật scheduler target.
+   */
+  async upsertSchedulerTarget(tenantId: string, dto: SchedulerTargetDto) {
+    await this.schedulerConfig.upsertTarget({
+      tenantId: dto.tenantId || tenantId,
+      matchId: dto.matchId,
+      timelineIds: dto.timelineIds,
+      enabled: dto.enabled ?? true,
+    });
+    return { status: 'upserted', matchId: dto.matchId, tenantId: dto.tenantId || tenantId };
+  }
+
+  /**
+   * Vô hiệu hóa scheduler target.
+   */
+  async disableSchedulerTarget(tenantId: string, matchId: string) {
+    await this.schedulerConfig.disableTarget(matchId, tenantId);
+    return { status: 'disabled', matchId, tenantId };
   }
 }

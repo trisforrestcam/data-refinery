@@ -10,11 +10,18 @@ import {
   OVERLAY_METRICS_JOB,
 } from '@common/constants/scheduler.constants';
 
-interface OverlayMetricsJobData {
-  timeRangeMinutes: number;
-  timelineIds: string[];
+interface SchedulerTarget {
   tenantId: string;
   matchId: string;
+  timelineIds: string[];
+}
+
+interface OverlayMetricsJobData {
+  timeRangeMinutes: number;
+  timelineIds?: string[];
+  tenantId?: string;
+  matchId?: string;
+  targets?: SchedulerTarget[];
   intervalFrom?: string | Date;
   intervalTo?: string | Date;
 }
@@ -38,7 +45,7 @@ export class OverlayMetricsProcessor extends WorkerHost {
 
   /**
    * Validate job data trước khi xử lý.
-   * Tránh pipeline chạy với data thiếu hoặc malformed gây lỗi ở tầng dưới.
+   * Hỗ trợ cả 2 format: legacy (flat tenantId/matchId/timelineIds) và mới (targets array).
    */
   private validateJobData(data: unknown): OverlayMetricsJobData | null {
     if (typeof data !== 'object' || data === null) {
@@ -53,6 +60,27 @@ export class OverlayMetricsProcessor extends WorkerHost {
     ) {
       return null;
     }
+
+    // New format: targets array
+    if (Array.isArray(d.targets) && d.targets.length > 0) {
+      const validTargets = d.targets.every(
+        (t: unknown) => {
+          if (typeof t !== 'object' || t === null) return false;
+          const rec = t as Record<string, unknown>;
+          return (
+            typeof rec.tenantId === 'string' &&
+            typeof rec.matchId === 'string' &&
+            Array.isArray(rec.timelineIds) &&
+            rec.timelineIds.length > 0
+          );
+        },
+      );
+      if (validTargets) {
+        return d as unknown as OverlayMetricsJobData;
+      }
+    }
+
+    // Legacy format: flat fields
     if (!Array.isArray(d.timelineIds) || d.timelineIds.length === 0) {
       return null;
     }
@@ -118,8 +146,8 @@ export class OverlayMetricsProcessor extends WorkerHost {
 
   /**
    * Entry point của ETL job.
-   * Validate data → resolve interval → chạy per-timeline.
-   * Nếu 1 timeline fail, throw để BullMQ retry cả job.
+   * Validate data → resolve interval → chạy per-target → per-timeline.
+   * Hỗ trợ cả legacy format và targets array.
    */
   async process(job: Job): Promise<void> {
     if (job.name !== OVERLAY_METRICS_JOB) {
@@ -131,7 +159,7 @@ export class OverlayMetricsProcessor extends WorkerHost {
 
     const data = this.validateJobData(job.data);
     if (!data) {
-      this.logger.warn('No timelineIds or tenantId provided, skipping');
+      this.logger.warn('No valid targets or timelineIds provided, skipping');
       return;
     }
 
@@ -142,24 +170,33 @@ export class OverlayMetricsProcessor extends WorkerHost {
       intervalMs,
     );
 
+    // Normalize to targets array
+    const targets: SchedulerTarget[] = data.targets ?? [
+      {
+        tenantId: data.tenantId!,
+        matchId: data.matchId!,
+        timelineIds: data.timelineIds!,
+      },
+    ];
+
     const failedTimelines: string[] = [];
 
-    for (const timelineId of data.timelineIds) {
-      try {
-        await this.processTimeline(
-          timelineId,
-          data.matchId,
-          data.tenantId,
-          intervalFrom,
-          intervalTo,
-        );
-      } catch (error) {
-        this.logger.error(
-          `Timeline ${timelineId} failed, skipping remaining timelines in this job: ${(error as Error).message}`,
-        );
-        failedTimelines.push(timelineId);
-        // Continue with next timeline instead of failing entire job
-        // This prevents already-accumulated data from being double-counted on retry
+    for (const target of targets) {
+      for (const timelineId of target.timelineIds) {
+        try {
+          await this.processTimeline(
+            timelineId,
+            target.matchId,
+            target.tenantId,
+            intervalFrom,
+            intervalTo,
+          );
+        } catch (error) {
+          this.logger.error(
+            `Target ${target.matchId} / Timeline ${timelineId} failed: ${(error as Error).message}`,
+          );
+          failedTimelines.push(`${target.matchId}:${timelineId}`);
+        }
       }
     }
 

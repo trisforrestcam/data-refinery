@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Headers, Query, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Headers, Query, Body, UseGuards, Param } from '@nestjs/common';
 import { MetricsApiService } from './metrics-api.service';
 import { MetricsQueryDto } from './dto/metrics-query.dto';
 import { BackfillJobDto } from './dto/backfill-job.dto';
+import { SchedulerTargetDto } from './dto/scheduler-target.dto';
 import { InternalApiGuard } from '@common/guards/internal-api.guard';
 import {
   ApiTags,
@@ -159,5 +160,43 @@ export class MetricsApiController {
     @Body() dto: BackfillJobDto,
   ) {
     return this.metricsApiService.triggerBackfill(tenantId, dto);
+  }
+
+  /**
+   * Lấy danh sách scheduler targets đang active.
+   */
+  @Get('scheduler-targets')
+  @ApiOperation({ summary: 'Get active scheduler targets' })
+  @ApiResponse({ status: 200, description: 'List of scheduler targets' })
+  async getSchedulerTargets(
+    @Headers('x-tenant-id') tenantId: string,
+  ) {
+    return this.metricsApiService.getSchedulerTargets(tenantId);
+  }
+
+  /**
+   * Thêm hoặc cập nhật scheduler target.
+   */
+  @Post('scheduler-targets')
+  @ApiOperation({ summary: 'Add or update scheduler target' })
+  @ApiResponse({ status: 200, description: 'Target upserted' })
+  async upsertSchedulerTarget(
+    @Headers('x-tenant-id') tenantId: string,
+    @Body() dto: SchedulerTargetDto,
+  ) {
+    return this.metricsApiService.upsertSchedulerTarget(tenantId, dto);
+  }
+
+  /**
+   * Vô hiệu hóa scheduler target.
+   */
+  @Patch('scheduler-targets/:matchId/disable')
+  @ApiOperation({ summary: 'Disable scheduler target' })
+  @ApiResponse({ status: 200, description: 'Target disabled' })
+  async disableSchedulerTarget(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('matchId') matchId: string,
+  ) {
+    return this.metricsApiService.disableSchedulerTarget(tenantId, matchId);
   }
 }
