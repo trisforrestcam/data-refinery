@@ -36,6 +36,11 @@ import { TimelineProcessorService } from './timeline-processor.service';
     JobProducerService,
     TimelineProcessorService,
   ],
-  exports: [KafkaProducerService, JobProducerService, TimelineProcessorService],
+  exports: [
+    SchedulerConfigService,
+    KafkaProducerService,
+    JobProducerService,
+    TimelineProcessorService,
+  ],
 })
 export class KafkaModule {}
