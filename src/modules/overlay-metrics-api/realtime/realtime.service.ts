@@ -22,9 +22,14 @@ export class RealtimeService {
    */
   async getFunnel(query: RealtimeQueryDto, tenantId: string) {
     const esQuery = this.buildEsQuery(query, tenantId);
+    this.logger.debug(`getFunnel start tenantId=${tenantId} esQuery=${JSON.stringify(esQuery)}`);
+
     const agg = await this.extractor.extractPlatformMetrics(esQuery);
+    this.logger.debug(`getFunnel raw agg took=${agg.took} hasAggs=${!!agg.aggregations}`);
+
     const ctx = this.buildContext(query, tenantId);
     const data = this.transformer.transformPlatformMetrics(agg.aggregations, ctx);
+    this.logger.debug(`getFunnel transformed rowCount=${data.length}`);
 
     // Aggregate across all platforms into single funnel
     let sent = 0, received = 0, rendered = 0, failed = 0;
@@ -52,10 +57,37 @@ export class RealtimeService {
    */
   async getLatency(query: RealtimeQueryDto, tenantId: string) {
     const esQuery = this.buildEsQuery(query, tenantId);
+    this.logger.debug(`getLatency start tenantId=${tenantId} esQuery=${JSON.stringify(esQuery)}`);
+
+    const agg = await this.extractor.extractLatency(esQuery);
+    this.logger.debug(`getLatency raw agg took=${agg.took} hasAggs=${!!agg.aggregations}`);
+
+    const ctx = this.buildContext(query, tenantId);
+    const data = this.transformer.transformLatency(agg.aggregations, ctx);
+    this.logger.debug(`getLatency transformed keys=${JSON.stringify(Object.keys(data || {}))}`);
+    return data;
+  }
+
+  /**
+   * Debug endpoint: trả về toàn bộ pipeline cho funnel.
+   */
+  async debugFunnel(query: RealtimeQueryDto, tenantId: string) {
+    const esQuery = this.buildEsQuery(query, tenantId);
+    const agg = await this.extractor.extractPlatformMetrics(esQuery);
+    const ctx = this.buildContext(query, tenantId);
+    const data = this.transformer.transformPlatformMetrics(agg.aggregations, ctx);
+    return { esQuery, rawAggregations: agg.aggregations, transformed: data };
+  }
+
+  /**
+   * Debug endpoint: trả về toàn bộ pipeline cho latency.
+   */
+  async debugLatency(query: RealtimeQueryDto, tenantId: string) {
+    const esQuery = this.buildEsQuery(query, tenantId);
     const agg = await this.extractor.extractLatency(esQuery);
     const ctx = this.buildContext(query, tenantId);
     const data = this.transformer.transformLatency(agg.aggregations, ctx);
-    return data;
+    return { esQuery, rawAggregations: agg.aggregations, transformed: data };
   }
 
   /**
@@ -160,22 +192,42 @@ export class RealtimeService {
   }
 
   private buildEsQuery(query: RealtimeQueryDto, tenantId: string) {
+    const now = Date.now();
+    const oneHour = 60 * 60 * 1000;
+
+    const from = query.from ? new Date(query.from) : new Date(now - oneHour);
+    const to = query.to ? new Date(query.to) : new Date(now);
+
+    const timelineIds = query.timelineIds?.length
+      ? query.timelineIds
+      : query.questionId
+        ? [query.questionId]
+        : undefined;
+
     return {
-      timelineIds: query.timelineIds?.length ? query.timelineIds : undefined,
+      timelineIds,
       tenantId,
-      from: query.from ? new Date(query.from) : undefined,
-      to: query.to ? new Date(query.to) : undefined,
+      from,
+      to,
       platform: query.platform,
+      mediaContentId: query.matchId,
+      environment: null as string | null,
     };
   }
 
   private buildContext(query: RealtimeQueryDto, tenantId: string) {
+    const now = Date.now();
+    const oneHour = 60 * 60 * 1000;
+
+    const intervalFrom = query.from ? new Date(query.from) : new Date(now - oneHour);
+    const intervalTo = query.to ? new Date(query.to) : new Date(now);
+
     return {
-      timelineId: query.timelineIds?.[0] || '',
-      matchId: '',
+      timelineId: query.timelineIds?.[0] || query.questionId || '',
+      matchId: query.matchId || '',
       tenantId,
-      intervalFrom: query.from ? new Date(query.from) : new Date(0),
-      intervalTo: query.to ? new Date(query.to) : new Date(),
+      intervalFrom,
+      intervalTo,
     };
   }
 

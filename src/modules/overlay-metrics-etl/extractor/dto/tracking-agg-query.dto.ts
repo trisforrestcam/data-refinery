@@ -34,4 +34,8 @@ export class TrackingAggQuery {
   @IsOptional()
   @IsString()
   platform?: string;
+
+  @IsOptional()
+  @IsString()
+  environment?: string | null;
 }

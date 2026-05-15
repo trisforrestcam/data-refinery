@@ -42,6 +42,16 @@ export class RealtimeQueryDto {
   @IsOptional()
   @IsString()
   platform?: string;
+
+  @ApiPropertyOptional({ description: 'Match ID (maps to labels.media_content_id in ES)' })
+  @IsOptional()
+  @IsString()
+  matchId?: string;
+
+  @ApiPropertyOptional({ description: 'Question ID (maps to labels.timeline_id in ES)' })
+  @IsOptional()
+  @IsString()
+  questionId?: string;
 }
 
 export class RealtimeDeviceQueryDto extends RealtimeQueryDto {

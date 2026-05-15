@@ -58,6 +58,7 @@ export class TrackingEsService {
   ): Promise<TrackingAggResult<PlatformMetricsAggs>> {
     const esQuery = this.buildBaseQuery(query);
 
+    this.logger.debug(`ES search platformMetrics — index=${this.getIndex()}`);
     const result = await this.esService.search<unknown, PlatformMetricsAggs>(
       {
         index: this.getIndex(),
@@ -90,6 +91,8 @@ export class TrackingEsService {
       { requestTimeout: this.getRequestTimeout() },
     );
 
+    const buckets = result.aggregations?.platforms?.buckets?.length ?? 0;
+    this.logger.debug(`ES platformMetrics done — took=${result.took}ms buckets=${buckets}`);
     return {
       aggregations: result.aggregations,
       took: result.took,
@@ -341,6 +344,7 @@ export class TrackingEsService {
   ): Promise<TrackingAggResult<LatencyAggs>> {
     const esQuery = this.buildBaseQuery(query);
 
+    this.logger.debug(`ES search latency — index=${this.getIndex()}`);
     const result = await this.esService.search<unknown, LatencyAggs>(
       {
         index: this.getIndex(),
@@ -386,6 +390,7 @@ export class TrackingEsService {
       { requestTimeout: this.getRequestTimeout() },
     );
 
+    this.logger.debug(`ES latency done — took=${result.took}ms hasAggs=${!!result.aggregations}`);
     return {
       aggregations: result.aggregations,
       took: result.took,
@@ -507,15 +512,23 @@ export class TrackingEsService {
 
     const must: Record<string, unknown>[] = [
       { term: { 'labels.tenant_id': query.tenantId } },
-      {
-        term: {
-          'labels.environment': this.configService.get<string>(
+    ];
+
+    const env =
+      query.environment !== undefined
+        ? query.environment
+        : this.configService.get<string>(
             'app.elasticApmEnvironment',
             'development',
-          ),
+          );
+
+    if (env !== null) {
+      must.push({
+        term: {
+          'labels.environment': env,
         },
-      },
-    ];
+      });
+    }
 
     if (query.timelineIds?.length) {
       must.push({ terms: { 'labels.timeline_id': query.timelineIds } });
@@ -544,6 +557,8 @@ export class TrackingEsService {
       must.push({ term: { 'labels.platform': query.platform } });
     }
 
-    return { bool: { must } };
+    const built = { bool: { must } };
+    this.logger.debug(JSON.stringify({ esBuiltQuery: built, inputQuery: query }));
+    return built;
   }
 }

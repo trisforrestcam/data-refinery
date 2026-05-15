@@ -103,4 +103,22 @@ export class RealtimeController {
   ) {
     return this.realtimeService.getHeatmap(query, tenantId);
   }
+
+  @Get('debug/funnel')
+  @ApiOperation({ summary: 'Debug funnel pipeline — trả về ES query + raw aggregations + transformed data' })
+  async debugFunnel(
+    @Headers('x-tenant-id') tenantId: string,
+    @Query() query: RealtimeQueryDto,
+  ) {
+    return this.realtimeService.debugFunnel(query, tenantId);
+  }
+
+  @Get('debug/latency')
+  @ApiOperation({ summary: 'Debug latency pipeline — trả về ES query + raw aggregations + transformed data' })
+  async debugLatency(
+    @Headers('x-tenant-id') tenantId: string,
+    @Query() query: RealtimeQueryDto,
+  ) {
+    return this.realtimeService.debugLatency(query, tenantId);
+  }
 }
