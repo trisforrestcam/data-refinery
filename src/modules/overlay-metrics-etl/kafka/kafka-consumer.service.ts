@@ -77,13 +77,22 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
       await this.commitOffset(topic, partition, offset);
     } catch (error) {
       if (retryCount < maxRetries) {
+        const nextRetry = retryCount + 1;
         const backoffMs = retryDelayMs * Math.pow(2, retryCount);
         this.logger.warn(
-          `Timeline ${payload.timelineId} failed (retry ${retryCount + 1}/${maxRetries}), pausing partition ${partition} for ${backoffMs}ms`,
+          `Timeline ${payload.timelineId} failed (retry ${nextRetry}/${maxRetries}), republishing with backoff ${backoffMs}ms`,
         );
-        this.consumer.pause([{ topic, partitions: [partition] }]);
-        await this.sleep(backoffMs);
-        this.consumer.resume([{ topic, partitions: [partition] }]);
+        try {
+          await this.kafkaProducer.sendJob({
+            ...payload,
+            retryCount: nextRetry,
+          });
+        } catch (publishError) {
+          this.logger.error(
+            `Failed to republish retry message for timeline ${payload.timelineId}: ${(publishError as Error).message}`,
+          );
+        }
+        await this.commitOffset(topic, partition, offset);
       } else {
         this.logger.error(
           `Timeline ${payload.timelineId} failed after ${maxRetries} retries, sending to DLQ`,
@@ -104,7 +113,5 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
     ]);
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
+
 }

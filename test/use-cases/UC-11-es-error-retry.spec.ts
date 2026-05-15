@@ -85,7 +85,7 @@ describe('UC-11 - Elasticsearch connection error retry qua Kafka consumer', () =
 
     beforeEach(async () => {
       timelineProcessor = { processTimeline: jest.fn().mockResolvedValue(undefined) };
-      kafkaProducer = { sendToDLQ: jest.fn().mockResolvedValue(undefined) };
+      kafkaProducer = { sendJob: jest.fn().mockResolvedValue(undefined), sendToDLQ: jest.fn().mockResolvedValue(undefined) };
 
       logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
       errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
@@ -119,7 +119,7 @@ describe('UC-11 - Elasticsearch connection error retry qua Kafka consumer', () =
       jest.restoreAllMocks();
     });
 
-    it('first failure (retryCount=0) → pause called, commitOffsets NOT called', async () => {
+    it('first failure (retryCount=0) → republish with retryCount=1 and commitOffsets', async () => {
       const esError = new Error('Elasticsearch connection lost');
       timelineProcessor.processTimeline.mockRejectedValueOnce(esError);
 
@@ -134,14 +134,17 @@ describe('UC-11 - Elasticsearch connection error retry qua Kafka consumer', () =
         },
       });
 
-      expect(pauseMock).toHaveBeenCalledWith([
-        { topic: 'overlay-metrics.etl.jobs', partitions: [0] },
+      expect(kafkaProducer.sendJob).toHaveBeenCalledTimes(1);
+      expect(kafkaProducer.sendJob).toHaveBeenCalledWith(
+        expect.objectContaining({ retryCount: 1 }),
+      );
+      expect(commitOffsetsMock).toHaveBeenCalledWith([
+        { topic: 'overlay-metrics.etl.jobs', partition: 0, offset: '101' },
       ]);
-      expect(commitOffsetsMock).not.toHaveBeenCalled();
       expect(kafkaProducer.sendToDLQ).not.toHaveBeenCalled();
     }, 15000);
 
-    it('second failure (retryCount=1) → pause called again, commitOffsets NOT called', async () => {
+    it('second failure (retryCount=1) → republish with retryCount=2 and commitOffsets', async () => {
       const esError = new Error('Elasticsearch cluster unavailable');
       timelineProcessor.processTimeline.mockRejectedValueOnce(esError);
 
@@ -155,10 +158,13 @@ describe('UC-11 - Elasticsearch connection error retry qua Kafka consumer', () =
         },
       });
 
-      expect(pauseMock).toHaveBeenCalledWith([
-        { topic: 'overlay-metrics.etl.jobs', partitions: [0] },
+      expect(kafkaProducer.sendJob).toHaveBeenCalledTimes(1);
+      expect(kafkaProducer.sendJob).toHaveBeenCalledWith(
+        expect.objectContaining({ retryCount: 2 }),
+      );
+      expect(commitOffsetsMock).toHaveBeenCalledWith([
+        { topic: 'overlay-metrics.etl.jobs', partition: 0, offset: '102' },
       ]);
-      expect(commitOffsetsMock).not.toHaveBeenCalled();
       expect(kafkaProducer.sendToDLQ).not.toHaveBeenCalled();
     }, 15000);
 

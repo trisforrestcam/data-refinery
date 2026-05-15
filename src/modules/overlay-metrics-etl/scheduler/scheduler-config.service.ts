@@ -49,10 +49,10 @@ export class SchedulerConfigService {
         enabled: t.enabled,
       }));
     } catch (error) {
-      this.logger.warn(
+      this.logger.error(
         `Failed to read scheduler targets from DB: ${(error as Error).message}.`,
       );
-      return [];
+      throw error;
     }
 
     const envTenantId = process.env.OVERLAY_METRICS_TENANT_ID;
@@ -77,6 +77,9 @@ export class SchedulerConfigService {
    * Thêm hoặc cập nhật target trong DB.
    */
   async upsertTarget(target: Omit<SchedulerTargetConfig, 'enabled'> & { enabled?: boolean }): Promise<void> {
+    if (!target.timelineIds || target.timelineIds.length === 0) {
+      throw new Error('timelineIds must not be empty');
+    }
     await this.targetModel.updateOne(
       { matchId: target.matchId, tenantId: target.tenantId },
       {

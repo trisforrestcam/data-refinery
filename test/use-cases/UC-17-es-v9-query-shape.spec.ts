@@ -371,15 +371,6 @@ describe('UC-17 ES v9 query shape use case', () => {
         ack_stats: {
           stats: { field: 'numeric_labels.ack_latency_ms' },
         },
-        render_duration: {
-          percentiles: {
-            field: 'numeric_labels.render_duration_ms',
-            percents: [50, 95, 99],
-          },
-        },
-        render_duration_stats: {
-          stats: { field: 'numeric_labels.render_duration_ms' },
-        },
       },
     });
   });

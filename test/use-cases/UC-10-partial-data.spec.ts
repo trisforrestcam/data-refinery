@@ -227,16 +227,6 @@ const latencyAggs = {
     avg: 2.345,
     max: 7.891,
   },
-  render_duration: {
-    values: {
-      '50.0': 44.444,
-      '95.0': 88.888,
-      '99.0': 120.001,
-    },
-  },
-  render_duration_stats: {
-    avg: null,
-  },
 } as unknown as LatencyAggs;
 
 const timeseriesAggsByMetric: Record<string, TimeseriesAggs> = {
@@ -418,9 +408,9 @@ describe('UC-10 - ES partial data nhưng ETL vẫn hoàn thành', () => {
       max: 7.89,
     });
     expect(latency.renderDuration).toEqual({
-      p50: 44.44,
-      p95: 88.89,
-      p99: 120,
+      p50: 45,
+      p95: 75.56,
+      p99: 110,
       avg: 0,
     });
 

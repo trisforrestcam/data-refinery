@@ -210,8 +210,7 @@ describe('TransformerService', () => {
       receive_stats: { avg: 12, max: 50 },
       render_stats: { avg: 60, max: 250 },
       ack_stats: { avg: 2.5, max: 15 },
-      render_duration: { values: { '50.0': 50, '95.0': 120, '99.0': 200 } },
-      render_duration_stats: { avg: 61, max: 250 },
+
     };
 
     const result = service.transformLatency(aggs, ctx);
@@ -244,7 +243,7 @@ describe('TransformerService', () => {
       p50: 50,
       p95: 120,
       p99: 200,
-      avg: 61,
+      avg: 60,
     });
   });
 

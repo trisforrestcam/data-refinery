@@ -84,6 +84,11 @@ export type OverlayMetricsLatencyDocument =
 export class OverlayMetricsLatency {
   /**
    * ID của timeline chứa overlay metrics.
+   *
+   * **Lưu ý:** `timelineId` không nằm trong unique key của latency
+   * (`tenantId + matchId + intervalFrom`). Khi nhiều timeline cùng match
+   * và interval được xử lý, field này phản ánh **timeline cuối cùng**
+   * đã góp phần vào record aggregate.
    */
   @Prop({ required: true })
   timelineId!: string;

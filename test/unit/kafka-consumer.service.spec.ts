@@ -147,11 +147,11 @@ describe('KafkaConsumerService', () => {
   describe('retry flow', () => {
     let moduleRef: TestingModule;
     let timelineProcessor: { processTimeline: jest.Mock };
-    let kafkaProducer: { sendToDLQ: jest.Mock };
+    let kafkaProducer: { sendJob: jest.Mock; sendToDLQ: jest.Mock };
 
     beforeEach(async () => {
       timelineProcessor = { processTimeline: jest.fn().mockRejectedValue(new Error('ES timeout')) };
-      kafkaProducer = { sendToDLQ: jest.fn().mockResolvedValue(undefined) };
+      kafkaProducer = { sendJob: jest.fn().mockResolvedValue(undefined), sendToDLQ: jest.fn().mockResolvedValue(undefined) };
 
       jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
       jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
@@ -175,16 +175,17 @@ describe('KafkaConsumerService', () => {
       jest.restoreAllMocks();
     });
 
-    it('processTimeline throw → pause được gọi, resume được gọi, commitOffsets KHÔNG được gọi', async () => {
+    it('processTimeline throw → republish with retryCount+1 and commitOffsets', async () => {
       await invokeEachMessage({ offset: '300' });
 
-      expect(pauseMock).toHaveBeenCalledWith([
-        { topic: 'overlay-metrics.etl.jobs', partitions: [0] },
+      expect(kafkaProducer.sendJob).toHaveBeenCalledTimes(1);
+      expect(kafkaProducer.sendJob).toHaveBeenCalledWith(
+        expect.objectContaining({ retryCount: 1 }),
+      );
+      expect(commitOffsetsMock).toHaveBeenCalledWith([
+        { topic: 'overlay-metrics.etl.jobs', partition: 0, offset: '301' },
       ]);
-      expect(resumeMock).toHaveBeenCalledWith([
-        { topic: 'overlay-metrics.etl.jobs', partitions: [0] },
-      ]);
-      expect(commitOffsetsMock).not.toHaveBeenCalled();
+      expect(pauseMock).not.toHaveBeenCalled();
     }, 15000);
 
     it('retryCount >= maxRetries → sendToDLQ được gọi và commitOffsets được gọi', async () => {

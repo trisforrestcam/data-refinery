@@ -104,8 +104,6 @@ export interface LatencyAggs {
   receive_stats?: EsAggStats;
   render_stats?: EsAggStats;
   ack_stats?: EsAggStats;
-  render_duration?: EsAggValues;
-  render_duration_stats?: EsAggStats;
 }
 
 // Timeseries

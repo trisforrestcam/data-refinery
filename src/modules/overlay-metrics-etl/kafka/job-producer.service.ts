@@ -36,15 +36,21 @@ export class JobProducerService {
 
     for (const target of targets) {
       for (const timelineId of target.timelineIds) {
-        await this.kafkaProducer.sendJob({
-          tenantId: target.tenantId,
-          matchId: target.matchId,
-          timelineId,
-          timeRangeMinutes: 60,
-          retryCount: 0,
-          origin: 'scheduled',
-          scheduledAt: new Date().toISOString(),
-        });
+        try {
+          await this.kafkaProducer.sendJob({
+            tenantId: target.tenantId,
+            matchId: target.matchId,
+            timelineId,
+            timeRangeMinutes: 60,
+            retryCount: 0,
+            origin: 'scheduled',
+            scheduledAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          this.logger.error(
+            `Failed to produce job for target ${target.matchId} timeline ${timelineId}: ${(error as Error).message}`,
+          );
+        }
       }
     }
 
@@ -65,21 +71,31 @@ export class JobProducerService {
     tenantId: string,
     dto: BackfillJobDto,
   ): Promise<{ status: string; correlationId: string }> {
+    if (dto.tenantId !== tenantId) {
+      throw new Error('Backfill tenantId does not match authenticated tenant');
+    }
+
     const correlationId = randomUUID();
-    const effectiveTenantId = dto.tenantId || tenantId;
 
     for (const timelineId of dto.timelineIds) {
-      await this.kafkaProducer.sendJob({
-        tenantId: effectiveTenantId,
-        matchId: dto.matchId,
-        timelineId,
-        timeRangeMinutes: dto.timeRangeMinutes ?? 5,
-        intervalFrom: dto.intervalFrom,
-        intervalTo: dto.intervalTo,
-        retryCount: 0,
-        origin: 'backfill',
-        correlationId,
-      });
+      try {
+        await this.kafkaProducer.sendJob({
+          tenantId: dto.tenantId,
+          matchId: dto.matchId,
+          timelineId,
+          timeRangeMinutes: dto.timeRangeMinutes ?? 5,
+          intervalFrom: dto.intervalFrom,
+          intervalTo: dto.intervalTo,
+          retryCount: 0,
+          origin: 'backfill',
+          correlationId,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Failed to produce backfill job for match ${dto.matchId} timeline ${timelineId}: ${(error as Error).message}`,
+        );
+        throw error;
+      }
     }
 
     this.logger.log(

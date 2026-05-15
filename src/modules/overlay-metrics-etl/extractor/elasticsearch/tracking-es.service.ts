@@ -335,9 +335,10 @@ export class TrackingEsService {
    * receive_stats:    stats(numeric_labels.receive_latency_ms)
    * render_stats:     stats(numeric_labels.render_duration_ms)
    * ack_stats:        stats(numeric_labels.ack_latency_ms)
-   * render_duration:  percentiles(numeric_labels.render_duration_ms,   [50,95,99])
-   * render_duration_stats: stats(numeric_labels.render_duration_ms)
    * ```
+   *
+   * `renderDuration` trong DTO được map từ `render_latency` / `render_stats`
+   * thay vì aggregation riêng để tránh query redundant.
    */
   async queryLatency(
     query: TrackingAggQuery,
@@ -376,15 +377,6 @@ export class TrackingEsService {
             stats: { field: 'numeric_labels.render_duration_ms' },
           },
           ack_stats: { stats: { field: 'numeric_labels.ack_latency_ms' } },
-          render_duration: {
-            percentiles: {
-              field: 'numeric_labels.render_duration_ms',
-              percents: [50, 95, 99],
-            },
-          },
-          render_duration_stats: {
-            stats: { field: 'numeric_labels.render_duration_ms' },
-          },
         },
       },
       { requestTimeout: this.getRequestTimeout() },

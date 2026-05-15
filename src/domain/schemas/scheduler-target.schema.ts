@@ -21,3 +21,4 @@ export class SchedulerTarget extends Document {
 }
 
 export const SchedulerTargetSchema = SchemaFactory.createForClass(SchedulerTarget);
+SchedulerTargetSchema.index({ enabled: 1 });

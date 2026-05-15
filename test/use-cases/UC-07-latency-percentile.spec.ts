@@ -38,9 +38,7 @@ describe('UC-07 - Báo cáo latency percentile', () => {
     receive_stats: { avg: 18.456, max: 100 },
     render_stats: { avg: 66.666, max: 250 },
     ack_stats: { avg: 3.333, max: 20 },
-    render_duration: {
-      values: { '50.0': 50, '75.0': 70, '95.0': 115, '99.0': 205 },
-    },
+
   };
 
   beforeEach(async () => {
@@ -159,9 +157,9 @@ describe('UC-07 - Báo cáo latency percentile', () => {
       max: 20,
     };
     const expectedRenderDuration: RenderDurationSet = {
-      p50: 50,
-      p95: 115,
-      p99: 205,
+      p50: 55,
+      p95: 120,
+      p99: 210,
       avg: 66.67,
     };
 
@@ -187,7 +185,6 @@ describe('UC-07 - Báo cáo latency percentile', () => {
       receive_latency: { values: { '50.0': null, '75.0': 12 } },
       render_latency: { values: {} },
       ack_latency: { values: { '95.0': 8 } },
-      render_duration: { values: { '50.0': 40, '95.0': null } },
     };
 
     const dto = transformerService.transformLatency(edgeAggs, ctx);
@@ -217,7 +214,7 @@ describe('UC-07 - Báo cáo latency percentile', () => {
       max: 0,
     });
     expect(dto.renderDuration).toEqual({
-      p50: 40,
+      p50: 0,
       p95: 0,
       p99: 0,
       avg: 0,

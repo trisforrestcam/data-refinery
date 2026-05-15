@@ -249,18 +249,15 @@ export class TransformerService {
       ack: mapP(aggregations?.ack_latency?.values, aggregations?.ack_stats),
       renderDuration: {
         p50: this.normalizeValue(
-          aggregations?.render_duration?.values?.['50.0'],
+          aggregations?.render_latency?.values?.['50.0'],
         ),
         p95: this.normalizeValue(
-          aggregations?.render_duration?.values?.['95.0'],
+          aggregations?.render_latency?.values?.['95.0'],
         ),
         p99: this.normalizeValue(
-          aggregations?.render_duration?.values?.['99.0'],
+          aggregations?.render_latency?.values?.['99.0'],
         ),
-        avg: this.normalizeValue(
-          aggregations?.render_duration_stats?.avg ??
-            aggregations?.render_stats?.avg,
-        ),
+        avg: this.normalizeValue(aggregations?.render_stats?.avg),
       },
       intervalFrom: ctx.intervalFrom,
       intervalTo: ctx.intervalTo,

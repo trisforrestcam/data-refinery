@@ -13,7 +13,7 @@ export default registerAs('elasticsearch', () => ({
   username: process.env.ELASTICSEARCH_USERNAME || undefined,
   password: process.env.ELASTICSEARCH_PASSWORD || undefined,
   apmIndex: process.env.ELASTICSEARCH_APM_INDEX || 'traces-apm-*',
-  trackingIndex: process.env.TRACKING_ES_INDEX || 'tracking-apm',
+  trackingIndex: process.env.TRACKING_ES_INDEX || 'tracking-events-*',
   trackingTimeoutMs: parseIntOrDefault(
     process.env.TRACKING_ES_TIMEOUT_MS,
     10000,
