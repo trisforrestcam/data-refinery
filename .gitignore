@@ -46,8 +46,8 @@ temp/
 .cache/'
 
 # agents
-.pi/*
-.claude/*
+.pi/
+.claude/
 
 # AI Agent artifacts (reviews, plans, worker contexts)
 review/
