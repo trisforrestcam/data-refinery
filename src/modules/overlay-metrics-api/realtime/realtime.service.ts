@@ -192,12 +192,6 @@ export class RealtimeService {
   }
 
   private buildEsQuery(query: RealtimeQueryDto, tenantId: string) {
-    const now = Date.now();
-    const oneHour = 60 * 60 * 1000;
-
-    const from = query.from ? new Date(query.from) : new Date(now - oneHour);
-    const to = query.to ? new Date(query.to) : new Date(now);
-
     const timelineIds = query.timelineIds?.length
       ? query.timelineIds
       : query.questionId
@@ -207,8 +201,8 @@ export class RealtimeService {
     return {
       timelineIds,
       tenantId,
-      from,
-      to,
+      from: query.from ? new Date(query.from) : undefined,
+      to: query.to ? new Date(query.to) : undefined,
       platform: query.platform,
       mediaContentId: query.matchId,
       environment: null as string | null,
@@ -216,11 +210,8 @@ export class RealtimeService {
   }
 
   private buildContext(query: RealtimeQueryDto, tenantId: string) {
-    const now = Date.now();
-    const oneHour = 60 * 60 * 1000;
-
-    const intervalFrom = query.from ? new Date(query.from) : new Date(now - oneHour);
-    const intervalTo = query.to ? new Date(query.to) : new Date(now);
+    const intervalFrom = query.from ? new Date(query.from) : new Date(0);
+    const intervalTo = query.to ? new Date(query.to) : new Date();
 
     return {
       timelineId: query.timelineIds?.[0] || query.questionId || '',
