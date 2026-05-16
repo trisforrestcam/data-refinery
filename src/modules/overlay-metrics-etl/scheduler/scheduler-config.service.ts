@@ -55,10 +55,6 @@ export class SchedulerConfigService {
       throw error;
     }
 
-    const envTenantId = process.env.OVERLAY_METRICS_TENANT_ID;
-    if (envTenantId) {
-      targets = targets.filter((t) => t.tenantId === envTenantId);
-    }
 
     targets = targets.filter((t) => {
       if (!this.tenantCache.has(t.tenantId)) {
