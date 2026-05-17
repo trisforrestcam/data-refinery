@@ -198,13 +198,20 @@ export class RealtimeService {
         ? [query.questionId]
         : undefined;
 
+    /**
+     * ES tracking-events khong co field labels.media_content_id.
+     * Neu da co timelineIds thi khong can filter them matchId
+     * vi timelineId da duy nhat identify events.
+     */
+    const mediaContentId = timelineIds ? undefined : query.matchId;
+
     return {
       timelineIds,
       tenantId,
       from: query.from ? new Date(query.from) : undefined,
       to: query.to ? new Date(query.to) : undefined,
       platform: query.platform,
-      mediaContentId: query.matchId,
+      mediaContentId,
       environment: null as string | null,
     };
   }
