@@ -70,7 +70,10 @@ export class TenantModelFactory {
    * Lấy Mongoose Model tương ứng với metric type trên connection của tenant.
    * Nếu model chưa được đăng ký trên connection này sẽ tự động tạo mới.
    */
-  async getModelByType(tenantId: string, type: MetricType): Promise<Model<any>> {
+  async getModelByType(
+    tenantId: string,
+    type: MetricType,
+  ): Promise<Model<any>> {
     const mapping = this.schemaMap[type];
     const conn = await this.connectionManager.getConnection(tenantId);
     return conn.model(mapping.name, mapping.schema);

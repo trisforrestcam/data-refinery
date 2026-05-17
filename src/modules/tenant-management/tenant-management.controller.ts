@@ -1,12 +1,7 @@
 import { Controller, Post, UseGuards } from '@nestjs/common';
 import { TenantManagementService } from './tenant-management.service';
 import { InternalApiGuard } from '@common/guards/internal-api.guard';
-import {
-  ApiTags,
-  ApiHeader,
-  ApiOperation,
-  ApiResponse,
-} from '@nestjs/swagger';
+import { ApiTags, ApiHeader, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 /**
  * API quản lý tenant.
@@ -22,7 +17,9 @@ import {
 @UseGuards(InternalApiGuard)
 @Controller('tenant-management')
 export class TenantManagementController {
-  constructor(private readonly tenantManagementService: TenantManagementService) {}
+  constructor(
+    private readonly tenantManagementService: TenantManagementService,
+  ) {}
 
   /**
    * Làm mới tenant cache: reload toàn bộ active tenants từ DB gốc vào bộ nhớ.

@@ -7,7 +7,6 @@ import { MetricsQueryDto } from './dto/metrics-query.dto';
 import { BackfillJobDto } from './dto/backfill-job.dto';
 import { SchedulerTargetDto } from './dto/scheduler-target.dto';
 
-
 /**
  * Service phục vụ API read metrics từ MongoDB.
  * Không chứa logic phức tạp — chỉ build filter và delegate cho Repository.
@@ -28,7 +27,11 @@ export class MetricsApiService {
    * Dùng cho tab "Tổng quan" trên dashboard overlay.
    */
   async getPlatformMetrics(tenantId: string, query: MetricsQueryDto) {
-    return this.repository.find(tenantId, MetricType.PLATFORM, MetricsApiService.buildFilter(tenantId, query));
+    return this.repository.find(
+      tenantId,
+      MetricType.PLATFORM,
+      MetricsApiService.buildFilter(tenantId, query),
+    );
   }
 
   /**
@@ -36,7 +39,11 @@ export class MetricsApiService {
    * Dùng cho tab "Thiết bị" trên dashboard.
    */
   async getDeviceBreakdown(tenantId: string, query: MetricsQueryDto) {
-    return this.repository.find(tenantId, MetricType.DEVICE, MetricsApiService.buildFilter(tenantId, query));
+    return this.repository.find(
+      tenantId,
+      MetricType.DEVICE,
+      MetricsApiService.buildFilter(tenantId, query),
+    );
   }
 
   /**
@@ -44,7 +51,11 @@ export class MetricsApiService {
    * Dùng cho tab "Transport" trên dashboard.
    */
   async getTransportComparison(tenantId: string, query: MetricsQueryDto) {
-    return this.repository.find(tenantId, MetricType.TRANSPORT, MetricsApiService.buildFilter(tenantId, query));
+    return this.repository.find(
+      tenantId,
+      MetricType.TRANSPORT,
+      MetricsApiService.buildFilter(tenantId, query),
+    );
   }
 
   /**
@@ -52,7 +63,11 @@ export class MetricsApiService {
    * Dùng cho tab "SDK" — xem version nào đang được dùng nhiều nhất.
    */
   async getSdkVersions(tenantId: string, query: MetricsQueryDto) {
-    return this.repository.find(tenantId, MetricType.SDK, MetricsApiService.buildFilter(tenantId, query));
+    return this.repository.find(
+      tenantId,
+      MetricType.SDK,
+      MetricsApiService.buildFilter(tenantId, query),
+    );
   }
 
   /**
@@ -60,7 +75,11 @@ export class MetricsApiService {
    * Dùng cho tab "Lỗi" — giúp dev định vị nhanh nguyên nhân.
    */
   async getFailures(tenantId: string, query: MetricsQueryDto) {
-    return this.repository.find(tenantId, MetricType.FAILURE, MetricsApiService.buildFilter(tenantId, query));
+    return this.repository.find(
+      tenantId,
+      MetricType.FAILURE,
+      MetricsApiService.buildFilter(tenantId, query),
+    );
   }
 
   /**
@@ -68,7 +87,11 @@ export class MetricsApiService {
    * Dùng cho tab "Latency" — đánh giá độ trễ hệ thống.
    */
   async getLatency(tenantId: string, query: MetricsQueryDto) {
-    return this.repository.find(tenantId, MetricType.LATENCY, MetricsApiService.buildFilter(tenantId, query));
+    return this.repository.find(
+      tenantId,
+      MetricType.LATENCY,
+      MetricsApiService.buildFilter(tenantId, query),
+    );
   }
 
   /**
@@ -76,7 +99,11 @@ export class MetricsApiService {
    * Có thể filter thêm theo metric name (sent, received, rendered, failed, avgRenderMs).
    * Dùng cho biểu đồ thờ gian trên dashboard.
    */
-  async getTimeseries(tenantId: string, query: MetricsQueryDto, metric?: string) {
+  async getTimeseries(
+    tenantId: string,
+    query: MetricsQueryDto,
+    metric?: string,
+  ) {
     const filter = MetricsApiService.buildFilter(tenantId, query);
     if (metric) {
       filter.metric = metric;
@@ -110,7 +137,11 @@ export class MetricsApiService {
       timelineIds: dto.timelineIds,
       enabled: dto.enabled ?? true,
     });
-    return { status: 'upserted', matchId: dto.matchId, tenantId: dto.tenantId || tenantId };
+    return {
+      status: 'upserted',
+      matchId: dto.matchId,
+      tenantId: dto.tenantId || tenantId,
+    };
   }
 
   /**

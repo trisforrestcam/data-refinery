@@ -92,7 +92,9 @@ export class TrackingEsService {
     );
 
     const buckets = result.aggregations?.platforms?.buckets?.length ?? 0;
-    this.logger.debug(`ES platformMetrics done — took=${result.took}ms buckets=${buckets}`);
+    this.logger.debug(
+      `ES platformMetrics done — took=${result.took}ms buckets=${buckets}`,
+    );
     return {
       aggregations: result.aggregations,
       took: result.took,
@@ -382,7 +384,9 @@ export class TrackingEsService {
       { requestTimeout: this.getRequestTimeout() },
     );
 
-    this.logger.debug(`ES latency done — took=${result.took}ms hasAggs=${!!result.aggregations}`);
+    this.logger.debug(
+      `ES latency done — took=${result.took}ms hasAggs=${!!result.aggregations}`,
+    );
     return {
       aggregations: result.aggregations,
       took: result.took,
@@ -550,7 +554,9 @@ export class TrackingEsService {
     }
 
     const built = { bool: { must } };
-    this.logger.debug(JSON.stringify({ esBuiltQuery: built, inputQuery: query }));
+    this.logger.debug(
+      JSON.stringify({ esBuiltQuery: built, inputQuery: query }),
+    );
     return built;
   }
 }

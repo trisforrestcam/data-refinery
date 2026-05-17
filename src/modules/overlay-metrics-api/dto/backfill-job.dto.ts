@@ -1,4 +1,11 @@
-import { IsString, IsArray, IsOptional, IsDateString, IsNumber, Min } from 'class-validator';
+import {
+  IsString,
+  IsArray,
+  IsOptional,
+  IsDateString,
+  IsNumber,
+  Min,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -10,7 +17,10 @@ export class BackfillJobDto {
   @IsString()
   tenantId!: string;
 
-  @ApiProperty({ description: 'Match ID cần tính lại', example: '000000000000000000000000' })
+  @ApiProperty({
+    description: 'Match ID cần tính lại',
+    example: '000000000000000000000000',
+  })
   @IsString()
   matchId!: string;
 
@@ -24,7 +34,8 @@ export class BackfillJobDto {
   timelineIds!: string[];
 
   @ApiPropertyOptional({
-    description: 'Thờ điểm bắt đầu (ISO 8601). Nếu không có, tính từ hiện tại - timeRangeMinutes',
+    description:
+      'Thờ điểm bắt đầu (ISO 8601). Nếu không có, tính từ hiện tại - timeRangeMinutes',
     example: '2024-01-01T00:00:00Z',
   })
   @IsOptional()
@@ -32,7 +43,8 @@ export class BackfillJobDto {
   intervalFrom?: string;
 
   @ApiPropertyOptional({
-    description: 'Thời điểm kết thúc (ISO 8601). Nếu không có, tính đến hiện tại',
+    description:
+      'Thời điểm kết thúc (ISO 8601). Nếu không có, tính đến hiện tại',
     example: '2024-01-01T01:00:00Z',
   })
   @IsOptional()

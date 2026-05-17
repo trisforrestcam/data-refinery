@@ -20,5 +20,6 @@ export class SchedulerTarget extends Document {
   enabled!: boolean;
 }
 
-export const SchedulerTargetSchema = SchemaFactory.createForClass(SchedulerTarget);
+export const SchedulerTargetSchema =
+  SchemaFactory.createForClass(SchedulerTarget);
 SchedulerTargetSchema.index({ enabled: 1 });

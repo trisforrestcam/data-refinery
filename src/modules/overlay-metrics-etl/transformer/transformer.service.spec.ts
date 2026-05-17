@@ -210,7 +210,6 @@ describe('TransformerService', () => {
       receive_stats: { avg: 12, max: 50 },
       render_stats: { avg: 60, max: 250 },
       ack_stats: { avg: 2.5, max: 15 },
-
     };
 
     const result = service.transformLatency(aggs, ctx);

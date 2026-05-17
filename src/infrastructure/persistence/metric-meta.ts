@@ -7,11 +7,34 @@ import { MetricType } from '@domain/enums/metric-type.enum';
  */
 export const UNIQUE_FIELDS: Record<MetricType, string[]> = {
   [MetricType.PLATFORM]: ['tenantId', 'matchId', 'platform', 'intervalFrom'],
-  [MetricType.DEVICE]: ['tenantId', 'matchId', 'dimension', 'bucketKey', 'intervalFrom'],
-  [MetricType.TRANSPORT]: ['tenantId', 'matchId', 'transportMode', 'intervalFrom'],
+  [MetricType.DEVICE]: [
+    'tenantId',
+    'matchId',
+    'dimension',
+    'bucketKey',
+    'intervalFrom',
+  ],
+  [MetricType.TRANSPORT]: [
+    'tenantId',
+    'matchId',
+    'transportMode',
+    'intervalFrom',
+  ],
   [MetricType.SDK]: ['tenantId', 'matchId', 'sdkVersion', 'intervalFrom'],
-  [MetricType.FAILURE]: ['tenantId', 'matchId', 'failureReason', 'failureStep', 'intervalFrom'],
-  [MetricType.TIMESERIES]: ['tenantId', 'matchId', 'metric', 'interval', 'time'],
+  [MetricType.FAILURE]: [
+    'tenantId',
+    'matchId',
+    'failureReason',
+    'failureStep',
+    'intervalFrom',
+  ],
+  [MetricType.TIMESERIES]: [
+    'tenantId',
+    'matchId',
+    'metric',
+    'interval',
+    'time',
+  ],
   [MetricType.LATENCY]: ['tenantId', 'matchId', 'intervalFrom'],
 };
 

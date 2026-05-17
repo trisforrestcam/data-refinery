@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extractor.service';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
-import { RealtimeQueryDto, RealtimeDeviceQueryDto, RealtimeTimeseriesQueryDto } from './realtime-query.dto';
+import {
+  RealtimeQueryDto,
+  RealtimeDeviceQueryDto,
+  RealtimeTimeseriesQueryDto,
+} from './realtime-query.dto';
 
 /**
  * Service query tracking metrics trực tiếp từ Elasticsearch (realtime).
@@ -22,17 +26,27 @@ export class RealtimeService {
    */
   async getFunnel(query: RealtimeQueryDto, tenantId: string) {
     const esQuery = this.buildEsQuery(query, tenantId);
-    this.logger.debug(`getFunnel start tenantId=${tenantId} esQuery=${JSON.stringify(esQuery)}`);
+    this.logger.debug(
+      `getFunnel start tenantId=${tenantId} esQuery=${JSON.stringify(esQuery)}`,
+    );
 
     const agg = await this.extractor.extractPlatformMetrics(esQuery);
-    this.logger.debug(`getFunnel raw agg took=${agg.took} hasAggs=${!!agg.aggregations}`);
+    this.logger.debug(
+      `getFunnel raw agg took=${agg.took} hasAggs=${!!agg.aggregations}`,
+    );
 
     const ctx = this.buildContext(query, tenantId);
-    const data = this.transformer.transformPlatformMetrics(agg.aggregations, ctx);
+    const data = this.transformer.transformPlatformMetrics(
+      agg.aggregations,
+      ctx,
+    );
     this.logger.debug(`getFunnel transformed rowCount=${data.length}`);
 
     // Aggregate across all platforms into single funnel
-    let sent = 0, received = 0, rendered = 0, failed = 0;
+    let sent = 0,
+      received = 0,
+      rendered = 0,
+      failed = 0;
     for (const item of data) {
       sent += item.sent;
       received += item.received;
@@ -57,14 +71,20 @@ export class RealtimeService {
    */
   async getLatency(query: RealtimeQueryDto, tenantId: string) {
     const esQuery = this.buildEsQuery(query, tenantId);
-    this.logger.debug(`getLatency start tenantId=${tenantId} esQuery=${JSON.stringify(esQuery)}`);
+    this.logger.debug(
+      `getLatency start tenantId=${tenantId} esQuery=${JSON.stringify(esQuery)}`,
+    );
 
     const agg = await this.extractor.extractLatency(esQuery);
-    this.logger.debug(`getLatency raw agg took=${agg.took} hasAggs=${!!agg.aggregations}`);
+    this.logger.debug(
+      `getLatency raw agg took=${agg.took} hasAggs=${!!agg.aggregations}`,
+    );
 
     const ctx = this.buildContext(query, tenantId);
     const data = this.transformer.transformLatency(agg.aggregations, ctx);
-    this.logger.debug(`getLatency transformed keys=${JSON.stringify(Object.keys(data || {}))}`);
+    this.logger.debug(
+      `getLatency transformed keys=${JSON.stringify(Object.keys(data || {}))}`,
+    );
     return data;
   }
 
@@ -75,7 +95,10 @@ export class RealtimeService {
     const esQuery = this.buildEsQuery(query, tenantId);
     const agg = await this.extractor.extractPlatformMetrics(esQuery);
     const ctx = this.buildContext(query, tenantId);
-    const data = this.transformer.transformPlatformMetrics(agg.aggregations, ctx);
+    const data = this.transformer.transformPlatformMetrics(
+      agg.aggregations,
+      ctx,
+    );
     return { esQuery, rawAggregations: agg.aggregations, transformed: data };
   }
 
@@ -114,7 +137,11 @@ export class RealtimeService {
     const esQuery = this.buildEsQuery(query, tenantId);
     const agg = await this.extractor.extractDeviceBreakdown(esQuery, dimension);
     const ctx = this.buildContext(query, tenantId);
-    const data = this.transformer.transformDeviceBreakdown(agg.aggregations, ctx, dimension);
+    const data = this.transformer.transformDeviceBreakdown(
+      agg.aggregations,
+      ctx,
+      dimension,
+    );
     return data.map((item) => ({
       dimension: item.bucketKey,
       received: item.received,
@@ -132,7 +159,10 @@ export class RealtimeService {
     const esQuery = this.buildEsQuery(query, tenantId);
     const agg = await this.extractor.extractTransportComparison(esQuery);
     const ctx = this.buildContext(query, tenantId);
-    const data = this.transformer.transformTransportComparison(agg.aggregations, ctx);
+    const data = this.transformer.transformTransportComparison(
+      agg.aggregations,
+      ctx,
+    );
     return data.map((item) => ({
       transportMode: item.transportMode,
       count: item.count,
@@ -165,9 +195,18 @@ export class RealtimeService {
     const metric = query.metric || 'sent';
     const interval = query.interval || '1m';
     const esQuery = this.buildEsQuery(query, tenantId);
-    const agg = await this.extractor.extractTimeseries(esQuery, metric, interval);
+    const agg = await this.extractor.extractTimeseries(
+      esQuery,
+      metric,
+      interval,
+    );
     const ctx = this.buildContext(query, tenantId);
-    const data = this.transformer.transformTimeseries(agg.aggregations, ctx, metric, interval);
+    const data = this.transformer.transformTimeseries(
+      agg.aggregations,
+      ctx,
+      metric,
+      interval,
+    );
     return data.map((item) => ({
       time: item.time,
       value: item.value,
@@ -181,7 +220,10 @@ export class RealtimeService {
     const esQuery = this.buildEsQuery(query, tenantId);
     const agg = await this.extractor.extractPlatformMetrics(esQuery);
     const ctx = this.buildContext(query, tenantId);
-    const data = this.transformer.transformPlatformMetrics(agg.aggregations, ctx);
+    const data = this.transformer.transformPlatformMetrics(
+      agg.aggregations,
+      ctx,
+    );
     return data.map((item) => ({
       platform: item.platform,
       sent: item.sent,

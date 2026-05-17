@@ -32,7 +32,7 @@ export class TimelineProcessorService {
       );
     }
 
-    const { tenantId, matchId, timelineId, timeRangeMinutes } = validated;
+    const { tenantId, matchId, timelineId } = validated;
     const { intervalFrom, intervalTo } = this.resolveInterval(validated);
 
     await this.executeTimelinePipeline(
@@ -89,17 +89,15 @@ export class TimelineProcessorService {
    * Ưu tiên explicit intervalFrom/intervalTo từ payload (backfill).
    * Nếu không có, tính từ thờ gian hiện tại round xuống bội số của timeRangeMinutes.
    */
-  private resolveInterval(
-    payload: JobPayload,
-  ): { intervalFrom: Date; intervalTo: Date } {
+  private resolveInterval(payload: JobPayload): {
+    intervalFrom: Date;
+    intervalTo: Date;
+  } {
     const explicitFrom = this.parseOptionalDate(
       payload.intervalFrom,
       'intervalFrom',
     );
-    const explicitTo = this.parseOptionalDate(
-      payload.intervalTo,
-      'intervalTo',
-    );
+    const explicitTo = this.parseOptionalDate(payload.intervalTo, 'intervalTo');
 
     if (explicitFrom || explicitTo) {
       if (!explicitFrom || !explicitTo || explicitFrom >= explicitTo) {
@@ -112,9 +110,7 @@ export class TimelineProcessorService {
 
     const intervalMs = payload.timeRangeMinutes * 60 * 1000;
     const nowMs = Date.now();
-    const intervalTo = new Date(
-      Math.floor(nowMs / intervalMs) * intervalMs,
-    );
+    const intervalTo = new Date(Math.floor(nowMs / intervalMs) * intervalMs);
     const intervalFrom = new Date(intervalTo.getTime() - intervalMs);
 
     return { intervalFrom, intervalTo };

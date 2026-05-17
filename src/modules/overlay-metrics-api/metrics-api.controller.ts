@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Patch, Headers, Query, Body, UseGuards, Param } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Headers,
+  Query,
+  Body,
+  UseGuards,
+  Param,
+} from '@nestjs/common';
 import { MetricsApiService } from './metrics-api.service';
 import { MetricsQueryDto } from './dto/metrics-query.dto';
 import { BackfillJobDto } from './dto/backfill-job.dto';
@@ -133,7 +143,8 @@ export class MetricsApiController {
   @ApiQuery({
     name: 'metric',
     required: false,
-    description: 'Metric name filter (e.g. sent, received, rendered, failed, avgRenderMs)',
+    description:
+      'Metric name filter (e.g. sent, received, rendered, failed, avgRenderMs)',
     example: 'sent',
   })
   @ApiResponse({ status: 200, description: 'List of timeseries points' })
@@ -168,9 +179,7 @@ export class MetricsApiController {
   @Get('scheduler-targets')
   @ApiOperation({ summary: 'Get active scheduler targets' })
   @ApiResponse({ status: 200, description: 'List of scheduler targets' })
-  async getSchedulerTargets(
-    @Headers('x-tenant-id') tenantId: string,
-  ) {
+  async getSchedulerTargets(@Headers('x-tenant-id') tenantId: string) {
     return this.metricsApiService.getSchedulerTargets(tenantId);
   }
 

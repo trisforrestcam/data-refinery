@@ -48,6 +48,7 @@ temp/
 # agents
 .pi/
 .claude/
+openspec
 
 # AI Agent artifacts (reviews, plans, worker contexts)
 review/

@@ -1,5 +1,11 @@
-import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Request } from 'express';
 
 /**
  * Guard xác thực server-to-server qua header x-internal-api-key.
@@ -11,7 +17,7 @@ export class InternalApiGuard implements CanActivate {
   constructor(private readonly config: ConfigService) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<Request>();
     const headerKey = request.headers['x-internal-api-key'];
     const apiKey = this.config.get<string>('app.internalApiKey');
 

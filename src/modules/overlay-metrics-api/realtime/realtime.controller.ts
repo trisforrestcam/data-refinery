@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Headers,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Headers, Query, UseGuards } from '@nestjs/common';
 import { RealtimeService } from './realtime.service';
 import {
   RealtimeQueryDto,
@@ -12,12 +6,7 @@ import {
   RealtimeTimeseriesQueryDto,
 } from './realtime-query.dto';
 import { InternalApiGuard } from '@common/guards/internal-api.guard';
-import {
-  ApiTags,
-  ApiHeader,
-  ApiOperation,
-  ApiResponse,
-} from '@nestjs/swagger';
+import { ApiTags, ApiHeader, ApiOperation } from '@nestjs/swagger';
 
 /**
  * Realtime tracking API — query ES trực tiếp và return data format tương thích
@@ -25,8 +14,16 @@ import {
  * Backend gọi endpoints này thay vì query ES trực tiếp.
  */
 @ApiTags('Realtime')
-@ApiHeader({ name: 'x-tenant-id', description: 'Tenant identifier', required: true })
-@ApiHeader({ name: 'x-internal-api-key', description: 'Internal API key', required: true })
+@ApiHeader({
+  name: 'x-tenant-id',
+  description: 'Tenant identifier',
+  required: true,
+})
+@ApiHeader({
+  name: 'x-internal-api-key',
+  description: 'Internal API key',
+  required: true,
+})
 @UseGuards(InternalApiGuard)
 @Controller('realtime')
 export class RealtimeController {
@@ -96,7 +93,9 @@ export class RealtimeController {
   }
 
   @Get('heatmap')
-  @ApiOperation({ summary: 'Get heatmap/platform breakdown (realtime from ES)' })
+  @ApiOperation({
+    summary: 'Get heatmap/platform breakdown (realtime from ES)',
+  })
   async getHeatmap(
     @Headers('x-tenant-id') tenantId: string,
     @Query() query: RealtimeQueryDto,
@@ -105,7 +104,10 @@ export class RealtimeController {
   }
 
   @Get('debug/funnel')
-  @ApiOperation({ summary: 'Debug funnel pipeline — trả về ES query + raw aggregations + transformed data' })
+  @ApiOperation({
+    summary:
+      'Debug funnel pipeline — trả về ES query + raw aggregations + transformed data',
+  })
   async debugFunnel(
     @Headers('x-tenant-id') tenantId: string,
     @Query() query: RealtimeQueryDto,
@@ -114,7 +116,10 @@ export class RealtimeController {
   }
 
   @Get('debug/latency')
-  @ApiOperation({ summary: 'Debug latency pipeline — trả về ES query + raw aggregations + transformed data' })
+  @ApiOperation({
+    summary:
+      'Debug latency pipeline — trả về ES query + raw aggregations + transformed data',
+  })
   async debugLatency(
     @Headers('x-tenant-id') tenantId: string,
     @Query() query: RealtimeQueryDto,

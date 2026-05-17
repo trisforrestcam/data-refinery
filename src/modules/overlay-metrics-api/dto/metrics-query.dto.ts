@@ -3,7 +3,10 @@ import { Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class MetricsQueryDto {
-  @ApiPropertyOptional({ description: 'Match ID', example: '000000000000000000000000' })
+  @ApiPropertyOptional({
+    description: 'Match ID',
+    example: '000000000000000000000000',
+  })
   @IsOptional()
   @IsString()
   matchId?: string;
@@ -15,15 +18,23 @@ export class MetricsQueryDto {
   })
   @IsOptional()
   @IsString({ each: true })
-  @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
+  @Transform(({ value }: { value: string | string[] }) =>
+    Array.isArray(value) ? value : [value],
+  )
   timelineIds?: string[];
 
-  @ApiPropertyOptional({ description: 'Start date (ISO 8601)', example: '2024-01-01T00:00:00Z' })
+  @ApiPropertyOptional({
+    description: 'Start date (ISO 8601)',
+    example: '2024-01-01T00:00:00Z',
+  })
   @IsOptional()
   @IsDateString()
   from?: string;
 
-  @ApiPropertyOptional({ description: 'End date (ISO 8601)', example: '2024-01-02T00:00:00Z' })
+  @ApiPropertyOptional({
+    description: 'End date (ISO 8601)',
+    example: '2024-01-02T00:00:00Z',
+  })
   @IsOptional()
   @IsDateString()
   to?: string;

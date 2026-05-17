@@ -40,7 +40,7 @@ export class TenantConnectionManager implements OnModuleDestroy {
       return existing;
     }
 
-    const promise = this.createConnection(tenantId);
+    const promise = Promise.resolve(this.createConnection(tenantId));
     this.pending.set(tenantId, promise);
     try {
       return await promise;
@@ -49,7 +49,7 @@ export class TenantConnectionManager implements OnModuleDestroy {
     }
   }
 
-  private async createConnection(tenantId: string): Promise<Connection> {
+  private createConnection(tenantId: string): Connection {
     const tenant = this.tenantCache.get(tenantId);
     if (!tenant) {
       throw new Error(`Tenant not found: ${tenantId}`);

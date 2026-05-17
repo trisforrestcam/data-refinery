@@ -23,7 +23,10 @@ async function bootstrap() {
       .setTitle('DataRefinery Metrics API')
       .setDescription('Overlay metrics read API for cross-service consumption')
       .setVersion('1.0')
-      .addApiKey({ type: 'apiKey', name: 'x-tenant-id', in: 'header' }, 'x-tenant-id')
+      .addApiKey(
+        { type: 'apiKey', name: 'x-tenant-id', in: 'header' },
+        'x-tenant-id',
+      )
       .build();
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);

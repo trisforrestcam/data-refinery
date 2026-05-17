@@ -58,7 +58,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
     let payload: JobPayload;
 
     try {
-      payload = JSON.parse(message.value!.toString());
+      payload = JSON.parse(message.value!.toString()) as JobPayload;
     } catch (error) {
       this.logger.error(
         `Failed to parse message at offset ${offset}: ${(error as Error).message}`,
@@ -112,6 +112,4 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
       { topic, partition, offset: (Number(offset) + 1).toString() },
     ]);
   }
-
-
 }

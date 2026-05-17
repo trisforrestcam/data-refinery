@@ -1,5 +1,5 @@
 import { IsOptional, IsString, IsDateString, IsEnum } from 'class-validator';
-import { Transform, Type } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum RealtimeDimension {
@@ -20,7 +20,9 @@ export class RealtimeQueryDto {
   @ApiPropertyOptional({ description: 'Timeline ID(s)' })
   @IsOptional()
   @IsString({ each: true })
-  @Transform(({ value }) => (Array.isArray(value) ? value : value ? [value] : []))
+  @Transform(({ value }: { value: string | string[] }) =>
+    Array.isArray(value) ? value : value ? [value] : [],
+  )
   timelineIds?: string[];
 
   @ApiPropertyOptional({ description: 'Tenant ID' })
@@ -43,12 +45,16 @@ export class RealtimeQueryDto {
   @IsString()
   platform?: string;
 
-  @ApiPropertyOptional({ description: 'Match ID (maps to labels.media_content_id in ES)' })
+  @ApiPropertyOptional({
+    description: 'Match ID (maps to labels.media_content_id in ES)',
+  })
   @IsOptional()
   @IsString()
   matchId?: string;
 
-  @ApiPropertyOptional({ description: 'Question ID (maps to labels.timeline_id in ES)' })
+  @ApiPropertyOptional({
+    description: 'Question ID (maps to labels.timeline_id in ES)',
+  })
   @IsOptional()
   @IsString()
   questionId?: string;

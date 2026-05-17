@@ -31,9 +31,9 @@ export class TenantCacheService implements OnModuleInit {
 
       for (const doc of tenants) {
         const tenant: Tenant = {
-          name: doc.name,
-          mongoUri: doc.mongoUri,
-          status: doc.status,
+          name: doc.name as string,
+          mongoUri: doc.mongoUri as string,
+          status: doc.status as string,
         };
         this.cache.set(tenant.name, tenant);
       }

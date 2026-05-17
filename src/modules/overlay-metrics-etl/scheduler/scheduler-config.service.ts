@@ -55,7 +55,6 @@ export class SchedulerConfigService {
       throw error;
     }
 
-
     targets = targets.filter((t) => {
       if (!this.tenantCache.has(t.tenantId)) {
         this.logger.warn(
@@ -72,7 +71,9 @@ export class SchedulerConfigService {
   /**
    * Thêm hoặc cập nhật target trong DB.
    */
-  async upsertTarget(target: Omit<SchedulerTargetConfig, 'enabled'> & { enabled?: boolean }): Promise<void> {
+  async upsertTarget(
+    target: Omit<SchedulerTargetConfig, 'enabled'> & { enabled?: boolean },
+  ): Promise<void> {
     if (!target.timelineIds || target.timelineIds.length === 0) {
       throw new Error('timelineIds must not be empty');
     }

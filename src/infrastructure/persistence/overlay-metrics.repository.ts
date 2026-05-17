@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { Model } from 'mongoose';
 import { AnyBulkWriteOperation } from 'mongodb';
 import { MetricType } from '@domain/enums/metric-type.enum';
 import { UNIQUE_FIELDS, INC_FIELDS, SORT_FIELDS } from './metric-meta';
@@ -24,10 +23,18 @@ export class OverlayMetricsRepository {
    * Mỗi metric type có composite unique key riêng (ví dụ: tenant + match + platform + interval).
    * Model được lấy động qua TenantModelFactory theo tenantId để đảm bảo cách ly dữ liệu.
    */
-  async upsert(tenantId: string, type: MetricType, items: Record<string, unknown>[]): Promise<void> {
+  async upsert(
+    tenantId: string,
+    type: MetricType,
+    items: Record<string, unknown>[],
+  ): Promise<void> {
     if (!items.length) return;
     const model = await this.tenantModelFactory.getModelByType(tenantId, type);
-    const ops = this.buildUpsertOps(items, UNIQUE_FIELDS[type], INC_FIELDS[type]);
+    const ops = this.buildUpsertOps(
+      items,
+      UNIQUE_FIELDS[type],
+      INC_FIELDS[type],
+    );
     await model.bulkWrite(ops, { ordered: false });
   }
 
@@ -36,10 +43,18 @@ export class OverlayMetricsRepository {
    * Sort mặc định theo thờ gian mới nhất để UI hiển thị interval gần nhất trước.
    * Model được lấy động qua TenantModelFactory theo tenantId để đảm bảo cách ly dữ liệu.
    */
-  async find<T = unknown>(tenantId: string, type: MetricType, filter: Record<string, unknown>): Promise<T[]> {
+  async find<T = unknown>(
+    tenantId: string,
+    type: MetricType,
+    filter: Record<string, unknown>,
+  ): Promise<T[]> {
     const model = await this.tenantModelFactory.getModelByType(tenantId, type);
     const sortField = SORT_FIELDS[type];
-    return model.find(filter).sort({ [sortField]: -1 }).lean().exec();
+    return model
+      .find(filter)
+      .sort({ [sortField]: -1 })
+      .lean()
+      .exec() as Promise<T[]>;
   }
 
   /**
@@ -60,7 +75,9 @@ export class OverlayMetricsRepository {
 
       for (const field of uniqueFields) {
         if (record[field] === undefined || record[field] === null) {
-          throw new Error(`Missing unique field "${field}" required for upsert filter`);
+          throw new Error(
+            `Missing unique field "${field}" required for upsert filter`,
+          );
         }
         filter[field] = record[field];
       }
