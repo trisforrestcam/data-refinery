@@ -123,21 +123,24 @@ describe('UC-04: Phân tích transport mode với p95 render latency', () => {
         ctx,
       );
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const [searchBody, searchOpts] = esSearchMock.mock.calls[0] as [Record<string, unknown>, Record<string, unknown>];
+    const [searchBody, searchOpts] = esSearchMock.mock.calls[0] as [
+      Record<string, unknown>,
+      Record<string, unknown>,
+    ];
     expect(searchBody).toMatchObject({
       index: 'tracking-events-*',
       size: 0,
     });
     expect(searchOpts).toEqual({ requestTimeout: 5000 });
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const aggs = searchBody.aggs as Record<string, unknown>;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const byTransportAggs = (aggs.by_transport as Record<string, unknown>).aggs as Record<string, unknown>;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+
+    const byTransportAggs = (aggs.by_transport as Record<string, unknown>)
+      .aggs as Record<string, unknown>;
+
     const byStageAggs = byTransportAggs.by_stage as Record<string, unknown>;
     expect(byStageAggs).toMatchObject({
+      aggs: {
         avg_render_ms: { avg: { field: 'numeric_labels.render_duration_ms' } },
         p95_render_ms: {
           percentiles: {
@@ -145,7 +148,8 @@ describe('UC-04: Phân tích transport mode với p95 render latency', () => {
             percents: [95],
           },
         },
-      });
+      },
+    });
 
     expect(result).toHaveLength(3);
     expect(result).toEqual([

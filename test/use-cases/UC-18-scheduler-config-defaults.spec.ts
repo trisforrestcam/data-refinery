@@ -41,7 +41,11 @@ function clearAllAppEnvVars(): void {
 }
 
 function createMockSchedulerConfigService(
-  activeTargets: Array<{ tenantId: string; matchId: string; timelineIds: string[] }> = [],
+  activeTargets: Array<{
+    tenantId: string;
+    matchId: string;
+    timelineIds: string[];
+  }> = [],
 ) {
   const configService = {
     getActiveTargets: jest.fn().mockResolvedValue(activeTargets),
@@ -53,7 +57,9 @@ function createMockSchedulerConfigService(
  * Tạo NestJS TestingModule chứa JobProducerService với mock dependencies.
  */
 async function createJobProducerModule(
-  activeTargets: ReturnType<typeof createMockSchedulerConfigService>['activeTargets'],
+  activeTargets: ReturnType<
+    typeof createMockSchedulerConfigService
+  >['activeTargets'],
 ): Promise<{ module: TestingModule; service: JobProducerService }> {
   const { configService } = createMockSchedulerConfigService(activeTargets);
   const kafkaProducerMock = { sendJob: jest.fn().mockResolvedValue(undefined) };
@@ -92,47 +98,65 @@ describe('UC-18 - JobProducer đăng ký cron & config defaults khi thiếu env 
     // ----- Test case 1 -----
     it('handleCron gọi sendJob một lần mỗi timeline với payload đúng (timeRangeMinutes: 60, origin: scheduled)', async () => {
       const { service } = await createJobProducerModule([
-        { tenantId: 'tenant-abc', matchId: 'match-123', timelineIds: ['tl-001', 'tl-002'] },
+        {
+          tenantId: 'tenant-abc',
+          matchId: 'match-123',
+          timelineIds: ['tl-001', 'tl-002'],
+        },
       ]);
 
       await service.handleCron();
 
-      const kafkaProducer = (service as unknown as Record<string, unknown>)['kafkaProducer'] as {
+      const kafkaProducer = (service as unknown as Record<string, unknown>)[
+        'kafkaProducer'
+      ] as {
         sendJob: jest.Mock;
       };
 
       expect(kafkaProducer.sendJob).toHaveBeenCalledTimes(2);
-      expect(kafkaProducer.sendJob).toHaveBeenNthCalledWith(1, expect.objectContaining({
-        tenantId: 'tenant-abc',
-        matchId: 'match-123',
-        timelineId: 'tl-001',
-        timeRangeMinutes: 60,
-        origin: 'scheduled',
-        retryCount: 0,
-      }));
-      expect(kafkaProducer.sendJob).toHaveBeenNthCalledWith(2, expect.objectContaining({
-        tenantId: 'tenant-abc',
-        matchId: 'match-123',
-        timelineId: 'tl-002',
-        timeRangeMinutes: 60,
-        origin: 'scheduled',
-        retryCount: 0,
-      }));
+      expect(kafkaProducer.sendJob).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          tenantId: 'tenant-abc',
+          matchId: 'match-123',
+          timelineId: 'tl-001',
+          timeRangeMinutes: 60,
+          origin: 'scheduled',
+          retryCount: 0,
+        }),
+      );
+      expect(kafkaProducer.sendJob).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          tenantId: 'tenant-abc',
+          matchId: 'match-123',
+          timelineId: 'tl-002',
+          timeRangeMinutes: 60,
+          origin: 'scheduled',
+          retryCount: 0,
+        }),
+      );
     });
 
     // ----- Test case 2 -----
     it('Log warning và không gọi sendJob khi không có active targets', async () => {
       const { service } = await createJobProducerModule([]);
-      const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const warnSpy = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
 
       await service.handleCron();
 
-      const kafkaProducer = (service as unknown as Record<string, unknown>)['kafkaProducer'] as {
+      const kafkaProducer = (service as unknown as Record<string, unknown>)[
+        'kafkaProducer'
+      ] as {
         sendJob: jest.Mock;
       };
 
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Overlay metrics scheduler: no active targets found'),
+        expect.stringContaining(
+          'Overlay metrics scheduler: no active targets found',
+        ),
       );
       expect(kafkaProducer.sendJob).not.toHaveBeenCalled();
 
@@ -144,10 +168,20 @@ describe('UC-18 - JobProducer đăng ký cron & config defaults khi thiếu env 
       process.env.OVERLAY_METRICS_TENANT_ID = 'tenant-abc';
 
       const { configService } = createMockSchedulerConfigService([
-        { tenantId: 'tenant-abc', matchId: 'match-123', timelineIds: ['tl-001'] },
-        { tenantId: 'tenant-xyz', matchId: 'match-456', timelineIds: ['tl-002'] },
+        {
+          tenantId: 'tenant-abc',
+          matchId: 'match-123',
+          timelineIds: ['tl-001'],
+        },
+        {
+          tenantId: 'tenant-xyz',
+          matchId: 'match-456',
+          timelineIds: ['tl-002'],
+        },
       ]);
-      const kafkaProducerMock = { sendJob: jest.fn().mockResolvedValue(undefined) };
+      const kafkaProducerMock = {
+        sendJob: jest.fn().mockResolvedValue(undefined),
+      };
 
       const module = await Test.createTestingModule({
         providers: [
@@ -161,14 +195,21 @@ describe('UC-18 - JobProducer đăng ký cron & config defaults khi thiếu env 
 
       // Mock getActiveTargets để trả về chỉ targets của tenant được filter
       configService.getActiveTargets = jest.fn().mockResolvedValue([
-        { tenantId: 'tenant-abc', matchId: 'match-123', timelineIds: ['tl-001'] },
+        {
+          tenantId: 'tenant-abc',
+          matchId: 'match-123',
+          timelineIds: ['tl-001'],
+        },
       ]);
 
       await service.handleCron();
 
       expect(kafkaProducerMock.sendJob).toHaveBeenCalledTimes(1);
       expect(kafkaProducerMock.sendJob).toHaveBeenCalledWith(
-        expect.objectContaining({ tenantId: 'tenant-abc', timelineId: 'tl-001' }),
+        expect.objectContaining({
+          tenantId: 'tenant-abc',
+          timelineId: 'tl-001',
+        }),
       );
     });
   });

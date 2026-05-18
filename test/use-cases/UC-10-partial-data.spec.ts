@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extractor.service';
+import { MetricType } from '@domain/enums/metric-type.enum';
 import { TrackingEsService } from '@modules/overlay-metrics-etl/extractor/elasticsearch/tracking-es.service';
 import type {
   DeviceBreakdownAggs,
@@ -14,6 +14,16 @@ import type {
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
 import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
+import { METRIC_PIPELINES } from '@modules/overlay-metrics-etl/pipelines/pipelines.module';
+import {
+  PlatformPipeline,
+  DevicePipeline,
+  TransportPipeline,
+  SdkPipeline,
+  FailurePipeline,
+  LatencyPipeline,
+  TimeseriesPipeline,
+} from '@modules/overlay-metrics-etl/pipelines';
 import type { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transform-context.interface';
 
 type TrackingEsMock = Record<
@@ -27,16 +37,7 @@ type TrackingEsMock = Record<
   jest.Mock
 >;
 
-type LoaderMock = Record<
-  | 'loadPlatformMetrics'
-  | 'loadDeviceBreakdown'
-  | 'loadTransportComparison'
-  | 'loadSdkVersions'
-  | 'loadFailures'
-  | 'loadLatency'
-  | 'loadTimeseries',
-  jest.Mock
->;
+type LoaderMock = Record<'load', jest.Mock>;
 
 const intervalFrom = new Date('2026-05-13T10:00:00.000Z');
 const intervalTo = new Date('2026-05-13T10:05:00.000Z');
@@ -78,7 +79,9 @@ const deviceAggsByDimension: Record<string, DeviceBreakdownAggs> = {
   browser: {
     by_dimension: {
       buckets: [
-        { key: 'Chrome' } as unknown as NonNullable<DeviceBreakdownAggs['by_dimension']>['buckets'][number],
+        { key: 'Chrome' } as unknown as NonNullable<
+          DeviceBreakdownAggs['by_dimension']
+        >['buckets'][number],
         {
           key: 'Safari',
           by_stage: {
@@ -241,7 +244,9 @@ const timeseriesAggsByMetric: Record<string, TimeseriesAggs> = {
         {
           key: Date.parse('2026-05-13T10:05:00.000Z'),
           key_as_string: '2026-05-13T10:05:00.000Z',
-        } as unknown as NonNullable<TimeseriesAggs['timeseries']>['buckets'][number],
+        } as unknown as NonNullable<
+          TimeseriesAggs['timeseries']
+        >['buckets'][number],
       ],
     },
   },
@@ -451,12 +456,13 @@ describe('UC-10 - ES partial data nhưng ETL vẫn hoàn thành', () => {
   it('processor không crash, vẫn chạy đủ 7 bước và load dữ liệu đã normalize khi ES trả partial data cho nhiều query', async () => {
     // Nghiệp vụ: dù một số aggregation con bị thiếu hoặc rỗng, processor vẫn phải xử lý hết pipeline và upsert được dữ liệu còn dùng được.
     const trackingEsMock: TrackingEsMock = {
-      queryPlatformMetrics: jest.fn().mockResolvedValue(aggResult(platformAggs)),
+      queryPlatformMetrics: jest
+        .fn()
+        .mockResolvedValue(aggResult(platformAggs)),
       queryDeviceBreakdown: jest
         .fn()
-        .mockImplementation(
-          async (_query: unknown, dimension: string) =>
-            aggResult(deviceAggsByDimension[dimension]),
+        .mockImplementation(async (_query: unknown, dimension: string) =>
+          aggResult(deviceAggsByDimension[dimension]),
         ),
       queryTransportComparison: jest
         .fn()
@@ -466,19 +472,12 @@ describe('UC-10 - ES partial data nhưng ETL vẫn hoàn thành', () => {
       queryLatency: jest.fn().mockResolvedValue(aggResult(latencyAggs)),
       queryTimeseries: jest
         .fn()
-        .mockImplementation(
-          async (_query: unknown, metric: string) =>
-            aggResult(timeseriesAggsByMetric[metric]),
+        .mockImplementation(async (_query: unknown, metric: string) =>
+          aggResult(timeseriesAggsByMetric[metric]),
         ),
     };
     const loaderMock: LoaderMock = {
-      loadPlatformMetrics: jest.fn().mockResolvedValue(undefined),
-      loadDeviceBreakdown: jest.fn().mockResolvedValue(undefined),
-      loadTransportComparison: jest.fn().mockResolvedValue(undefined),
-      loadSdkVersions: jest.fn().mockResolvedValue(undefined),
-      loadFailures: jest.fn().mockResolvedValue(undefined),
-      loadLatency: jest.fn().mockResolvedValue(undefined),
-      loadTimeseries: jest.fn().mockResolvedValue(undefined),
+      load: jest.fn().mockResolvedValue(undefined),
     };
     const errorSpy = jest
       .spyOn(Logger.prototype, 'error')
@@ -487,10 +486,37 @@ describe('UC-10 - ES partial data nhưng ETL vẫn hoàn thành', () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         TimelineProcessorService,
-        ExtractorService,
+        PlatformPipeline,
+        DevicePipeline,
+        TransportPipeline,
+        SdkPipeline,
+        FailurePipeline,
+        LatencyPipeline,
+        TimeseriesPipeline,
         TransformerService,
         { provide: TrackingEsService, useValue: trackingEsMock },
         { provide: LoaderService, useValue: loaderMock },
+        {
+          provide: METRIC_PIPELINES,
+          useFactory: (
+            platform: PlatformPipeline,
+            device: DevicePipeline,
+            transport: TransportPipeline,
+            sdk: SdkPipeline,
+            failure: FailurePipeline,
+            latency: LatencyPipeline,
+            timeseries: TimeseriesPipeline,
+          ) => [platform, device, transport, sdk, failure, latency, timeseries],
+          inject: [
+            PlatformPipeline,
+            DevicePipeline,
+            TransportPipeline,
+            SdkPipeline,
+            FailurePipeline,
+            LatencyPipeline,
+            TimeseriesPipeline,
+          ],
+        },
       ],
     }).compile();
     const timelineProcessor = moduleRef.get(TimelineProcessorService);
@@ -504,7 +530,9 @@ describe('UC-10 - ES partial data nhưng ETL vẫn hoàn thành', () => {
       intervalTo: intervalTo.toISOString(),
     };
 
-    await expect(timelineProcessor.processTimeline(payload)).resolves.toBeUndefined();
+    await expect(
+      timelineProcessor.processTimeline(payload),
+    ).resolves.toBeUndefined();
 
     expect(errorSpy).not.toHaveBeenCalled();
 
@@ -547,13 +575,28 @@ describe('UC-10 - ES partial data nhưng ETL vẫn hoàn thành', () => {
       '5m',
     );
 
-    expect(loaderMock.loadPlatformMetrics).toHaveBeenCalledWith(ctx.tenantId, [
+    const calls = loaderMock.load.mock.calls as [
+      string,
+      MetricType,
+      unknown[],
+    ][];
+    expect(calls.length).toBe(13);
+
+    const platformCall = calls.find(([, type]) => type === MetricType.PLATFORM);
+    expect(platformCall).toBeDefined();
+    expect(platformCall![2]).toEqual([
       expect.objectContaining({ platform: 'web', sent: 0, avgRenderMs: 0 }),
       expect.objectContaining({ platform: 'ios', avgRenderMs: 0 }),
     ]);
 
-    expect(loaderMock.loadDeviceBreakdown).toHaveBeenCalledTimes(3);
-    expect(loaderMock.loadDeviceBreakdown).toHaveBeenNthCalledWith(1, ctx.tenantId, [
+    const deviceCalls = calls.filter(([, type]) => type === MetricType.DEVICE);
+    expect(deviceCalls.length).toBe(3);
+
+    const browserCall = deviceCalls.find((call) =>
+      (call[2] as any[]).some((item) => item.dimension === 'browser'),
+    );
+    expect(browserCall).toBeDefined();
+    expect(browserCall![2]).toEqual([
       expect.objectContaining({
         dimension: 'browser',
         bucketKey: 'Chrome',
@@ -569,14 +612,32 @@ describe('UC-10 - ES partial data nhưng ETL vẫn hoàn thành', () => {
       }),
     ]);
 
-    expect(loaderMock.loadTransportComparison).toHaveBeenCalledWith(ctx.tenantId, [
+    const transportCall = calls.find(
+      ([, type]) => type === MetricType.TRANSPORT,
+    );
+    expect(transportCall).toBeDefined();
+    expect(transportCall![2]).toEqual([
       expect.objectContaining({ transportMode: 'webrtc', p95RenderMs: 0 }),
-      expect.objectContaining({ transportMode: 'http', avgRenderMs: 0, p95RenderMs: 0 }),
+      expect.objectContaining({
+        transportMode: 'http',
+        avgRenderMs: 0,
+        p95RenderMs: 0,
+      }),
     ]);
-    expect(loaderMock.loadSdkVersions).toHaveBeenCalledWith(ctx.tenantId, [
-      expect.objectContaining({ sdkVersion: '2.1.0', count: 20, avgRenderMs: 24.5 }),
+
+    const sdkCall = calls.find(([, type]) => type === MetricType.SDK);
+    expect(sdkCall).toBeDefined();
+    expect(sdkCall![2]).toEqual([
+      expect.objectContaining({
+        sdkVersion: '2.1.0',
+        count: 20,
+        avgRenderMs: 24.5,
+      }),
     ]);
-    expect(loaderMock.loadFailures).toHaveBeenCalledWith(ctx.tenantId, [
+
+    const failureCall = calls.find(([, type]) => type === MetricType.FAILURE);
+    expect(failureCall).toBeDefined();
+    expect(failureCall![2]).toEqual([
       expect.objectContaining({
         failureReason: 'network',
         failureStep: 'render',
@@ -584,22 +645,44 @@ describe('UC-10 - ES partial data nhưng ETL vẫn hoàn thành', () => {
         percentOfFailed: 100,
       }),
     ]);
-    expect(loaderMock.loadLatency).toHaveBeenCalledWith(ctx.tenantId, [
+
+    const latencyCall = calls.find(([, type]) => type === MetricType.LATENCY);
+    expect(latencyCall).toBeDefined();
+    expect(latencyCall![2]).toEqual([
       expect.objectContaining({
         receive: expect.objectContaining({ avg: 0, max: 0, p95: 0, p99: 0 }),
         render: expect.objectContaining({ avg: 0, max: 120 }),
         renderDuration: expect.objectContaining({ avg: 0 }),
       }),
     ]);
-    expect(loaderMock.loadTimeseries).toHaveBeenCalledTimes(5);
-    expect(loaderMock.loadTimeseries).toHaveBeenNthCalledWith(1, ctx.tenantId, [
+
+    const timeseriesCalls = calls.filter(
+      ([, type]) => type === MetricType.TIMESERIES,
+    );
+    expect(timeseriesCalls.length).toBe(5);
+
+    const sentCall = timeseriesCalls.find((call) =>
+      (call[2] as any[]).some((item) => item.metric === 'sent'),
+    );
+    expect(sentCall).toBeDefined();
+    expect(sentCall![2]).toEqual([
       expect.objectContaining({ metric: 'sent', value: 100 }),
       expect.objectContaining({ metric: 'sent', value: 0 }),
     ]);
-    expect(loaderMock.loadTimeseries).toHaveBeenNthCalledWith(3, ctx.tenantId, [
+
+    const renderedCall = timeseriesCalls.find((call) =>
+      (call[2] as any[]).some((item) => item.metric === 'rendered'),
+    );
+    expect(renderedCall).toBeDefined();
+    expect(renderedCall![2]).toEqual([
       expect.objectContaining({ metric: 'rendered', value: 0 }),
     ]);
-    expect(loaderMock.loadTimeseries).toHaveBeenNthCalledWith(5, ctx.tenantId, [
+
+    const avgRenderMsCall = timeseriesCalls.find((call) =>
+      (call[2] as any[]).some((item) => item.metric === 'avgRenderMs'),
+    );
+    expect(avgRenderMsCall).toBeDefined();
+    expect(avgRenderMsCall![2]).toEqual([
       expect.objectContaining({ metric: 'avgRenderMs', value: 0 }),
     ]);
 

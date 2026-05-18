@@ -29,6 +29,7 @@ coverage/
 !.vscode/launch.json
 !.vscode/extensions.json
 .idea/
+.zed/
 
 # OS
 .DS_Store
@@ -56,4 +57,3 @@ plan.md
 progress.md
 reviewer-*.md
 worker-*.md
-

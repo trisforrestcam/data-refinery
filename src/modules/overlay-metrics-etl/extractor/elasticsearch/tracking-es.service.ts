@@ -29,8 +29,6 @@ export interface TrackingAggResult<TAggs = Record<string, unknown>> {
  * Dùng flat-query style của **Elasticsearch Client v9** (không có wrapper `body`).
  * Mỗi public method tương ứng với một tab của màn "Chỉ số bản overlay",
  * trả về dữ liệu đã aggregate sẵn để {@link TransformerService} chỉ cần map shape.
- *
- * @see {@link ExtractorService} — facade delegate xuống service này.
  */
 @Injectable()
 export class TrackingEsService {
@@ -40,6 +38,26 @@ export class TrackingEsService {
     private readonly esService: ElasticsearchService,
     private readonly configService: ConfigService,
   ) {}
+
+  /**
+   * Thực thi aggregation query chung — template method cho tất cả ES queries.
+   * Chỉ phần `aggs` khác nhau giữa các metric type.
+   */
+  private async executeAgg<TAggs>(
+    query: TrackingAggQuery,
+    aggs: Record<string, any>,
+  ): Promise<TrackingAggResult<TAggs>> {
+    const result = await this.esService.search<unknown, TAggs>(
+      {
+        index: this.getIndex(),
+        size: 0,
+        query: this.buildBaseQuery(query),
+        aggs,
+      },
+      { requestTimeout: this.getRequestTimeout() },
+    );
+    return { aggregations: result.aggregations, took: result.took };
+  }
 
   /**
    * **Tab Tổng quan** — Platform metrics.
@@ -56,49 +74,36 @@ export class TrackingEsService {
   async queryPlatformMetrics(
     query: TrackingAggQuery,
   ): Promise<TrackingAggResult<PlatformMetricsAggs>> {
-    const esQuery = this.buildBaseQuery(query);
-
     this.logger.debug(`ES search platformMetrics — index=${this.getIndex()}`);
-    const result = await this.esService.search<unknown, PlatformMetricsAggs>(
-      {
-        index: this.getIndex(),
-        size: 0,
-        query: esQuery,
+    const result = await this.executeAgg<PlatformMetricsAggs>(query, {
+      platforms: {
+        terms: { field: 'labels.platform', size: 100, missing: 'unknown' },
         aggs: {
-          platforms: {
-            terms: { field: 'labels.platform', size: 100, missing: 'unknown' },
+          sent: {
+            filter: { term: { 'labels.stage': 'sent' } },
             aggs: {
-              sent: {
-                filter: { term: { 'labels.stage': 'sent' } },
-                aggs: {
-                  room_size_sum: { sum: { field: 'numeric_labels.room_size' } },
-                },
-              },
-              received: { filter: { term: { 'labels.stage': 'received' } } },
-              rendered: {
-                filter: { term: { 'labels.stage': 'rendered' } },
-                aggs: {
-                  avg_render_ms: {
-                    avg: { field: 'numeric_labels.render_duration_ms' },
-                  },
-                },
-              },
-              failed: { filter: { term: { 'labels.stage': 'render-failed' } } },
+              room_size_sum: { sum: { field: 'numeric_labels.room_size' } },
             },
           },
+          received: { filter: { term: { 'labels.stage': 'received' } } },
+          rendered: {
+            filter: { term: { 'labels.stage': 'rendered' } },
+            aggs: {
+              avg_render_ms: {
+                avg: { field: 'numeric_labels.render_duration_ms' },
+              },
+            },
+          },
+          failed: { filter: { term: { 'labels.stage': 'render-failed' } } },
         },
       },
-      { requestTimeout: this.getRequestTimeout() },
-    );
+    });
 
     const buckets = result.aggregations?.platforms?.buckets?.length ?? 0;
     this.logger.debug(
       `ES platformMetrics done — took=${result.took}ms buckets=${buckets}`,
     );
-    return {
-      aggregations: result.aggregations,
-      took: result.took,
-    };
+    return result;
   }
 
   /**
@@ -123,46 +128,31 @@ export class TrackingEsService {
       deviceClass: 'labels.device_class',
     };
 
-    const esQuery = this.buildBaseQuery(query);
-
-    const result = await this.esService.search<unknown, DeviceBreakdownAggs>(
-      {
-        index: this.getIndex(),
-        size: 0,
-        query: esQuery,
+    return this.executeAgg<DeviceBreakdownAggs>(query, {
+      by_dimension: {
+        terms: {
+          field: fieldMap[dimension] || fieldMap.browser,
+          size: 50,
+          missing: 'unknown',
+        },
         aggs: {
-          by_dimension: {
-            terms: {
-              field: fieldMap[dimension] || fieldMap.browser,
-              size: 50,
-              missing: 'unknown',
+          by_stage: {
+            filters: {
+              filters: {
+                received: { term: { 'labels.stage': 'received' } },
+                rendered: { term: { 'labels.stage': 'rendered' } },
+                failed: { term: { 'labels.stage': 'render-failed' } },
+              },
             },
             aggs: {
-              by_stage: {
-                filters: {
-                  filters: {
-                    received: { term: { 'labels.stage': 'received' } },
-                    rendered: { term: { 'labels.stage': 'rendered' } },
-                    failed: { term: { 'labels.stage': 'render-failed' } },
-                  },
-                },
-                aggs: {
-                  avg_render_ms: {
-                    avg: { field: 'numeric_labels.render_duration_ms' },
-                  },
-                },
+              avg_render_ms: {
+                avg: { field: 'numeric_labels.render_duration_ms' },
               },
             },
           },
         },
       },
-      { requestTimeout: this.getRequestTimeout() },
-    );
-
-    return {
-      aggregations: result.aggregations,
-      took: result.took,
-    };
+    });
   }
 
   /**
@@ -179,54 +169,36 @@ export class TrackingEsService {
   async queryTransportComparison(
     query: TrackingAggQuery,
   ): Promise<TrackingAggResult<TransportComparisonAggs>> {
-    const esQuery = this.buildBaseQuery(query);
-
-    const result = await this.esService.search<
-      unknown,
-      TransportComparisonAggs
-    >(
-      {
-        index: this.getIndex(),
-        size: 0,
-        query: esQuery,
+    return this.executeAgg<TransportComparisonAggs>(query, {
+      by_transport: {
+        terms: {
+          field: 'labels.transport_mode',
+          size: 10,
+          missing: 'unknown',
+        },
         aggs: {
-          by_transport: {
-            terms: {
-              field: 'labels.transport_mode',
-              size: 10,
-              missing: 'unknown',
+          by_stage: {
+            filters: {
+              filters: {
+                received: { term: { 'labels.stage': 'received' } },
+                rendered: { term: { 'labels.stage': 'rendered' } },
+              },
             },
             aggs: {
-              by_stage: {
-                filters: {
-                  filters: {
-                    received: { term: { 'labels.stage': 'received' } },
-                    rendered: { term: { 'labels.stage': 'rendered' } },
-                  },
-                },
-                aggs: {
-                  avg_render_ms: {
-                    avg: { field: 'numeric_labels.render_duration_ms' },
-                  },
-                  p95_render_ms: {
-                    percentiles: {
-                      field: 'numeric_labels.render_duration_ms',
-                      percents: [95],
-                    },
-                  },
+              avg_render_ms: {
+                avg: { field: 'numeric_labels.render_duration_ms' },
+              },
+              p95_render_ms: {
+                percentiles: {
+                  field: 'numeric_labels.render_duration_ms',
+                  percents: [95],
                 },
               },
             },
           },
         },
       },
-      { requestTimeout: this.getRequestTimeout() },
-    );
-
-    return {
-      aggregations: result.aggregations,
-      took: result.took,
-    };
+    });
   }
 
   /**
@@ -242,45 +214,30 @@ export class TrackingEsService {
   async querySdkVersions(
     query: TrackingAggQuery,
   ): Promise<TrackingAggResult<SdkVersionAggs>> {
-    const esQuery = this.buildBaseQuery(query);
-
-    const result = await this.esService.search<unknown, SdkVersionAggs>(
-      {
-        index: this.getIndex(),
-        size: 0,
-        query: esQuery,
+    return this.executeAgg<SdkVersionAggs>(query, {
+      by_sdk_version: {
+        terms: {
+          field: 'labels.sdk_version',
+          size: 50,
+          missing: 'unknown',
+        },
         aggs: {
-          by_sdk_version: {
-            terms: {
-              field: 'labels.sdk_version',
-              size: 50,
-              missing: 'unknown',
+          by_stage: {
+            filters: {
+              filters: {
+                received: { term: { 'labels.stage': 'received' } },
+                rendered: { term: { 'labels.stage': 'rendered' } },
+              },
             },
             aggs: {
-              by_stage: {
-                filters: {
-                  filters: {
-                    received: { term: { 'labels.stage': 'received' } },
-                    rendered: { term: { 'labels.stage': 'rendered' } },
-                  },
-                },
-                aggs: {
-                  avg_render_ms: {
-                    avg: { field: 'numeric_labels.render_duration_ms' },
-                  },
-                },
+              avg_render_ms: {
+                avg: { field: 'numeric_labels.render_duration_ms' },
               },
             },
           },
         },
       },
-      { requestTimeout: this.getRequestTimeout() },
-    );
-
-    return {
-      aggregations: result.aggregations,
-      took: result.took,
-    };
+    });
   }
 
   /**
@@ -298,29 +255,14 @@ export class TrackingEsService {
   async queryFailures(
     query: TrackingAggQuery,
   ): Promise<TrackingAggResult<FailureAggs>> {
-    const esQuery = this.buildBaseQuery(query);
-
-    const result = await this.esService.search<unknown, FailureAggs>(
-      {
-        index: this.getIndex(),
-        size: 0,
-        query: esQuery,
+    return this.executeAgg<FailureAggs>(query, {
+      by_reason: {
+        terms: { field: 'labels.failure_reason', size: 50 },
         aggs: {
-          by_reason: {
-            terms: { field: 'labels.failure_reason', size: 50 },
-            aggs: {
-              by_step: { terms: { field: 'labels.failure_step', size: 20 } },
-            },
-          },
+          by_step: { terms: { field: 'labels.failure_step', size: 20 } },
         },
       },
-      { requestTimeout: this.getRequestTimeout() },
-    );
-
-    return {
-      aggregations: result.aggregations,
-      took: result.took,
-    };
+    });
   }
 
   /**
@@ -345,56 +287,43 @@ export class TrackingEsService {
   async queryLatency(
     query: TrackingAggQuery,
   ): Promise<TrackingAggResult<LatencyAggs>> {
-    const esQuery = this.buildBaseQuery(query);
-
     this.logger.debug(`ES search latency — index=${this.getIndex()}`);
-    const result = await this.esService.search<unknown, LatencyAggs>(
-      {
-        index: this.getIndex(),
-        size: 0,
-        query: esQuery,
-        aggs: {
-          receive_latency: {
-            percentiles: {
-              field: 'numeric_labels.receive_latency_ms',
-              percents: [50, 75, 95, 99],
-            },
-          },
-          render_latency: {
-            percentiles: {
-              field: 'numeric_labels.render_duration_ms',
-              percents: [50, 75, 95, 99],
-            },
-          },
-          ack_latency: {
-            percentiles: {
-              field: 'numeric_labels.ack_latency_ms',
-              percents: [50, 75, 95, 99],
-            },
-          },
-          receive_stats: {
-            stats: { field: 'numeric_labels.receive_latency_ms' },
-          },
-          render_stats: {
-            stats: { field: 'numeric_labels.render_duration_ms' },
-          },
-          ack_stats: { stats: { field: 'numeric_labels.ack_latency_ms' } },
+    const result = await this.executeAgg<LatencyAggs>(query, {
+      receive_latency: {
+        percentiles: {
+          field: 'numeric_labels.receive_latency_ms',
+          percents: [50, 75, 95, 99],
         },
       },
-      { requestTimeout: this.getRequestTimeout() },
-    );
+      render_latency: {
+        percentiles: {
+          field: 'numeric_labels.render_duration_ms',
+          percents: [50, 75, 95, 99],
+        },
+      },
+      ack_latency: {
+        percentiles: {
+          field: 'numeric_labels.ack_latency_ms',
+          percents: [50, 75, 95, 99],
+        },
+      },
+      receive_stats: {
+        stats: { field: 'numeric_labels.receive_latency_ms' },
+      },
+      render_stats: {
+        stats: { field: 'numeric_labels.render_duration_ms' },
+      },
+      ack_stats: { stats: { field: 'numeric_labels.ack_latency_ms' } },
+    });
 
     this.logger.debug(
       `ES latency done — took=${result.took}ms hasAggs=${!!result.aggregations}`,
     );
-    return {
-      aggregations: result.aggregations,
-      took: result.took,
-    };
+    return result;
   }
 
   /**
-   * **Tab Thời gian** — Dữ liệu timeseries.
+   * **Tab Thờ gian** — Dữ liệu timeseries.
    *
    * Cấu trúc aggregation:
    * ```
@@ -418,8 +347,6 @@ export class TrackingEsService {
     metric: string,
     interval: string,
   ): Promise<TrackingAggResult<TimeseriesAggs>> {
-    const esQuery = this.buildBaseQuery(query);
-
     const metricMap: Record<string, { type: string; field?: string }> = {
       sent: { type: 'sum', field: 'numeric_labels.room_size' },
       received: { type: 'count' },
@@ -450,25 +377,12 @@ export class TrackingEsService {
       throw new Error(`Unsupported timeseries metric: ${metric}`);
     }
 
-    const result = await this.esService.search<unknown, TimeseriesAggs>(
-      {
-        index: this.getIndex(),
-        size: 0,
-        query: esQuery,
-        aggs: {
-          timeseries: {
-            date_histogram: { field: '@timestamp', fixed_interval: interval },
-            aggs: { metric_value: metricAgg },
-          },
-        },
+    return this.executeAgg<TimeseriesAggs>(query, {
+      timeseries: {
+        date_histogram: { field: '@timestamp', fixed_interval: interval },
+        aggs: { metric_value: metricAgg },
       },
-      { requestTimeout: this.getRequestTimeout() },
-    );
-
-    return {
-      aggregations: result.aggregations,
-      took: result.took,
-    };
+    });
   }
 
   /** Lấy index pattern tracking từ config (mặc định `tracking-events-*`). */

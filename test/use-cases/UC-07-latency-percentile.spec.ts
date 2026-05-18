@@ -38,12 +38,13 @@ describe('UC-07 - Báo cáo latency percentile', () => {
     receive_stats: { avg: 18.456, max: 100 },
     render_stats: { avg: 66.666, max: 250 },
     ack_stats: { avg: 3.333, max: 20 },
-
   };
 
   beforeEach(async () => {
     esServiceMock = {
-      search: jest.fn().mockResolvedValue({ aggregations: latencyAggs, took: 7 }),
+      search: jest
+        .fn()
+        .mockResolvedValue({ aggregations: latencyAggs, took: 7 }),
     };
 
     const configValues: Record<string, unknown> = {
@@ -177,7 +178,9 @@ describe('UC-07 - Báo cáo latency percentile', () => {
 
     // renderDuration.avg phải lấy từ stats.avg của render_stats, không lấy từ render_latency percentile.
     expect(dto.renderDuration.avg).toBe(dto.render.avg);
-    expect(dto.renderDuration.avg).not.toBe(latencyAggs.render_latency?.values['50.0']);
+    expect(dto.renderDuration.avg).not.toBe(
+      latencyAggs.render_latency?.values['50.0'],
+    );
   });
 
   it('edge case: thiếu percentile keys hoặc stats thì default về 0', () => {

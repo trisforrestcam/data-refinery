@@ -1,4 +1,4 @@
-import { Test, TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MetricsApiController } from '@modules/overlay-metrics-api/metrics-api.controller';
@@ -26,7 +26,9 @@ describe('UC-19 - Read API tests', () => {
   describe('InternalApiGuard', () => {
     let guard: InternalApiGuard;
 
-    const createMockContext = (headers: Record<string, string>): ExecutionContext =>
+    const createMockContext = (
+      headers: Record<string, string>,
+    ): ExecutionContext =>
       ({
         switchToHttp: () => ({
           getRequest: () => ({ headers }),
@@ -48,7 +50,9 @@ describe('UC-19 - Read API tests', () => {
       guard = createGuard(apiKey);
       const ctx = createMockContext({});
       expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);
-      expect(() => guard.canActivate(ctx)).toThrow('Invalid or missing internal API key');
+      expect(() => guard.canActivate(ctx)).toThrow(
+        'Invalid or missing internal API key',
+      );
     });
 
     it('reject khi api key sai', () => {
@@ -60,7 +64,9 @@ describe('UC-19 - Read API tests', () => {
     it('reject khi INTERNAL_API_KEY chưa configure', () => {
       guard = createGuard(undefined);
       const ctx = createMockContext({ 'x-internal-api-key': apiKey });
-      expect(() => guard.canActivate(ctx)).toThrow('INTERNAL_API_KEY not configured');
+      expect(() => guard.canActivate(ctx)).toThrow(
+        'INTERNAL_API_KEY not configured',
+      );
     });
   });
 
@@ -71,14 +77,26 @@ describe('UC-19 - Read API tests', () => {
 
     beforeEach(async () => {
       repository = { find: jest.fn().mockResolvedValue([]) };
-      jobProducerService = { triggerBackfill: jest.fn().mockResolvedValue({ status: 'published', correlationId: 'corr-123' }) };
+      jobProducerService = {
+        triggerBackfill: jest.fn().mockResolvedValue({
+          status: 'published',
+          correlationId: 'corr-123',
+        }),
+      };
 
       const moduleRef = await Test.createTestingModule({
         providers: [
           MetricsApiService,
           { provide: OverlayMetricsRepository, useValue: repository },
           { provide: JobProducerService, useValue: jobProducerService },
-          { provide: SchedulerConfigService, useValue: { getActiveTargets: jest.fn(), upsertTarget: jest.fn(), disableTarget: jest.fn() } },
+          {
+            provide: SchedulerConfigService,
+            useValue: {
+              getActiveTargets: jest.fn(),
+              upsertTarget: jest.fn(),
+              disableTarget: jest.fn(),
+            },
+          },
         ],
       }).compile();
 
@@ -87,25 +105,37 @@ describe('UC-19 - Read API tests', () => {
 
     it('filter chỉ có tenantId khi query rỗng', async () => {
       await service.getPlatformMetrics(tenantId, {});
-      expect(repository.find).toHaveBeenCalledWith(tenantId, MetricType.PLATFORM, { tenantId });
+      expect(repository.find).toHaveBeenCalledWith(
+        tenantId,
+        MetricType.PLATFORM,
+        { tenantId },
+      );
     });
 
     it('filter có matchId equality', async () => {
       const query: MetricsQueryDto = { matchId: 'match-123' };
       await service.getPlatformMetrics(tenantId, query);
-      expect(repository.find).toHaveBeenCalledWith(tenantId, MetricType.PLATFORM, {
+      expect(repository.find).toHaveBeenCalledWith(
         tenantId,
-        matchId: 'match-123',
-      });
+        MetricType.PLATFORM,
+        {
+          tenantId,
+          matchId: 'match-123',
+        },
+      );
     });
 
     it('filter có timelineIds $in array', async () => {
       const query: MetricsQueryDto = { timelineIds: ['tl-1', 'tl-2'] };
       await service.getDeviceBreakdown(tenantId, query);
-      expect(repository.find).toHaveBeenCalledWith(tenantId, MetricType.DEVICE, {
+      expect(repository.find).toHaveBeenCalledWith(
         tenantId,
-        timelineId: { $in: ['tl-1', 'tl-2'] },
-      });
+        MetricType.DEVICE,
+        {
+          tenantId,
+          timelineId: { $in: ['tl-1', 'tl-2'] },
+        },
+      );
     });
 
     it('filter có date range trên intervalFrom', async () => {
@@ -114,13 +144,17 @@ describe('UC-19 - Read API tests', () => {
         to: '2024-01-02T00:00:00Z',
       };
       await service.getTransportComparison(tenantId, query);
-      expect(repository.find).toHaveBeenCalledWith(tenantId, MetricType.TRANSPORT, {
+      expect(repository.find).toHaveBeenCalledWith(
         tenantId,
-        intervalFrom: {
-          $gte: new Date('2024-01-01T00:00:00Z'),
-          $lte: new Date('2024-01-02T00:00:00Z'),
+        MetricType.TRANSPORT,
+        {
+          tenantId,
+          intervalFrom: {
+            $gte: new Date('2024-01-01T00:00:00Z'),
+            $lte: new Date('2024-01-02T00:00:00Z'),
+          },
         },
-      });
+      );
     });
 
     it('filter kết hợp tất cả fields', async () => {
@@ -131,23 +165,31 @@ describe('UC-19 - Read API tests', () => {
         to: '2024-01-02T00:00:00Z',
       };
       await service.getFailures(tenantId, query);
-      expect(repository.find).toHaveBeenCalledWith(tenantId, MetricType.FAILURE, {
+      expect(repository.find).toHaveBeenCalledWith(
         tenantId,
-        matchId: 'match-abc',
-        timelineId: { $in: ['tl-1'] },
-        intervalFrom: {
-          $gte: new Date('2024-01-01T00:00:00Z'),
-          $lte: new Date('2024-01-02T00:00:00Z'),
+        MetricType.FAILURE,
+        {
+          tenantId,
+          matchId: 'match-abc',
+          timelineId: { $in: ['tl-1'] },
+          intervalFrom: {
+            $gte: new Date('2024-01-01T00:00:00Z'),
+            $lte: new Date('2024-01-02T00:00:00Z'),
+          },
         },
-      });
+      );
     });
 
     it('timeseries filter thêm metric name', async () => {
       await service.getTimeseries(tenantId, {}, 'sent');
-      expect(repository.find).toHaveBeenCalledWith(tenantId, MetricType.TIMESERIES, {
+      expect(repository.find).toHaveBeenCalledWith(
         tenantId,
-        metric: 'sent',
-      });
+        MetricType.TIMESERIES,
+        {
+          tenantId,
+          metric: 'sent',
+        },
+      );
     });
 
     it('triggerBackfill gọi jobProducerService.triggerBackfill với đúng DTO', async () => {
@@ -160,7 +202,10 @@ describe('UC-19 - Read API tests', () => {
 
       await service.triggerBackfill(tenantId, dto);
 
-      expect(jobProducerService.triggerBackfill).toHaveBeenCalledWith(tenantId, dto);
+      expect(jobProducerService.triggerBackfill).toHaveBeenCalledWith(
+        tenantId,
+        dto,
+      );
     });
 
     it('triggerBackfill trả về status published và correlationId', async () => {
@@ -196,7 +241,10 @@ describe('UC-19 - Read API tests', () => {
       service = {
         getPlatformMetrics: jest.fn().mockResolvedValue([{ platform: 'web' }]),
         getTimeseries: jest.fn().mockResolvedValue([{ metric: 'sent' }]),
-        triggerBackfill: jest.fn().mockResolvedValue({ status: 'published', correlationId: 'corr-test' }),
+        triggerBackfill: jest.fn().mockResolvedValue({
+          status: 'published',
+          correlationId: 'corr-test',
+        }),
       };
 
       const moduleRef = await Test.createTestingModule({
@@ -219,8 +267,16 @@ describe('UC-19 - Read API tests', () => {
 
     it('getTimeseries truyền metric param', async () => {
       const query: MetricsQueryDto = {};
-      const result = await controller.getTimeseries(tenantId, query, 'received');
-      expect(service.getTimeseries).toHaveBeenCalledWith(tenantId, query, 'received');
+      const result = await controller.getTimeseries(
+        tenantId,
+        query,
+        'received',
+      );
+      expect(service.getTimeseries).toHaveBeenCalledWith(
+        tenantId,
+        query,
+        'received',
+      );
       expect(result).toEqual([{ metric: 'sent' }]);
     });
 

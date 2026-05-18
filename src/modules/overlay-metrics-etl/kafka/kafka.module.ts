@@ -1,9 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ExtractorModule } from '../extractor/extractor.module';
-import { TransformerModule } from '../transformer/transformer.module';
-import { LoaderModule } from '../loader/loader.module';
+import { PipelinesModule } from '../pipelines/pipelines.module';
 import kafkaConfig from '@config/kafka.config';
 import {
   SchedulerTarget,
@@ -18,6 +16,7 @@ import { TimelineProcessorService } from './timeline-processor.service';
 /**
  * KafkaModule thay thế SchedulerModule trong ETL pipeline.
  * Cung cấp producer (cron + backfill), consumer, và timeline processor.
+ * Import PipelinesModule để inject MetricPipeline[] vào TimelineProcessorService.
  */
 @Module({
   imports: [
@@ -25,9 +24,7 @@ import { TimelineProcessorService } from './timeline-processor.service';
     MongooseModule.forFeature([
       { name: SchedulerTarget.name, schema: SchedulerTargetSchema },
     ]),
-    ExtractorModule,
-    TransformerModule,
-    LoaderModule,
+    PipelinesModule,
   ],
   providers: [
     SchedulerConfigService,

@@ -6,7 +6,7 @@ import {
   RealtimeTimeseriesQueryDto,
 } from './realtime-query.dto';
 import { InternalApiGuard } from '@common/guards/internal-api.guard';
-import { ApiTags, ApiHeader, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 
 /**
  * Realtime tracking API — query ES trực tiếp và return data format tương thích
@@ -14,16 +14,6 @@ import { ApiTags, ApiHeader, ApiOperation } from '@nestjs/swagger';
  * Backend gọi endpoints này thay vì query ES trực tiếp.
  */
 @ApiTags('Realtime')
-@ApiHeader({
-  name: 'x-tenant-id',
-  description: 'Tenant identifier',
-  required: true,
-})
-@ApiHeader({
-  name: 'x-internal-api-key',
-  description: 'Internal API key',
-  required: true,
-})
 @UseGuards(InternalApiGuard)
 @Controller('realtime')
 export class RealtimeController {

@@ -1,6 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { KafkaProducerService, JobPayload } from '@modules/overlay-metrics-etl/kafka/kafka-producer.service';
+import {
+  KafkaProducerService,
+  JobPayload,
+} from '@modules/overlay-metrics-etl/kafka/kafka-producer.service';
 
 // ---------------------------------------------------------------------------
 // Mock kafkajs Producer
@@ -103,7 +106,9 @@ describe('KafkaProducerService', () => {
 
       await service.sendJob(payload);
 
-      const parsedValue = JSON.parse(sendMock.mock.calls[0][0].messages[0].value);
+      const parsedValue = JSON.parse(
+        sendMock.mock.calls[0][0].messages[0].value,
+      );
       expect(parsedValue).toMatchObject({
         version: 1,
         jobType: 'extract-transform-load-metrics',
@@ -141,7 +146,9 @@ describe('KafkaProducerService', () => {
       expect(parsedValue.errorMessage).toBe('ES connection timeout');
       expect(parsedValue.errorStack).toBeDefined();
       expect(parsedValue.failedAt).toBeDefined();
-      expect(new Date(parsedValue.failedAt).toISOString()).toBe(parsedValue.failedAt);
+      expect(new Date(parsedValue.failedAt).toISOString()).toBe(
+        parsedValue.failedAt,
+      );
       expect(parsedValue.tenantId).toBe('tenant-003');
       expect(parsedValue.timelineId).toBe('tl-003');
     });

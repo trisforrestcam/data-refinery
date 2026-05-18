@@ -14,13 +14,7 @@ import { MetricsQueryDto } from './dto/metrics-query.dto';
 import { BackfillJobDto } from './dto/backfill-job.dto';
 import { SchedulerTargetDto } from './dto/scheduler-target.dto';
 import { InternalApiGuard } from '@common/guards/internal-api.guard';
-import {
-  ApiTags,
-  ApiHeader,
-  ApiOperation,
-  ApiResponse,
-  ApiQuery,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 
 /**
  * Read API cho overlay metrics.
@@ -28,16 +22,6 @@ import {
  * Dữ liệu được pre-aggregate mỗi 5 phút bởi ETL pipeline.
  */
 @ApiTags('Metrics')
-@ApiHeader({
-  name: 'x-tenant-id',
-  description: 'Tenant identifier (required)',
-  required: true,
-})
-@ApiHeader({
-  name: 'x-internal-api-key',
-  description: 'Internal API key for server-to-server auth',
-  required: true,
-})
 @UseGuards(InternalApiGuard)
 @Controller('metrics')
 export class MetricsApiController {

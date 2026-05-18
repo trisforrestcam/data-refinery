@@ -1,7 +1,7 @@
 import { Controller, Post, UseGuards } from '@nestjs/common';
 import { TenantManagementService } from './tenant-management.service';
 import { InternalApiGuard } from '@common/guards/internal-api.guard';
-import { ApiTags, ApiHeader, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 /**
  * API quản lý tenant.
@@ -9,11 +9,6 @@ import { ApiTags, ApiHeader, ApiOperation, ApiResponse } from '@nestjs/swagger';
  * dùng khi có thay đổi cấu hình tenant mà không muốn restart app.
  */
 @ApiTags('Tenant Management')
-@ApiHeader({
-  name: 'x-internal-api-key',
-  description: 'Internal API key for server-to-server auth',
-  required: true,
-})
 @UseGuards(InternalApiGuard)
 @Controller('tenant-management')
 export class TenantManagementController {

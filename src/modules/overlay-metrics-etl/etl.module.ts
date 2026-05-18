@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
-import { ExtractorModule } from './extractor/extractor.module';
-import { TransformerModule } from './transformer/transformer.module';
-import { LoaderModule } from './loader/loader.module';
+import { PipelinesModule } from './pipelines/pipelines.module';
 import { KafkaModule } from './kafka/kafka.module';
 
+/**
+ * ETL Module tổng hợp toàn bộ pipeline ETL cho overlay metrics.
+ * Import PipelinesModule (chứa 7 metric strategies) và KafkaModule (scheduler + consumer).
+ */
 @Module({
-  imports: [ExtractorModule, TransformerModule, LoaderModule, KafkaModule],
+  imports: [PipelinesModule, KafkaModule],
 })
 export class EtlModule {}

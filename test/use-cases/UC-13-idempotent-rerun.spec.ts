@@ -1,12 +1,14 @@
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { ExtractorService } from '../../src/modules/overlay-metrics-etl/extractor/extractor.service';
 import { LoaderService } from '../../src/modules/overlay-metrics-etl/loader/loader.service';
 import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
 import { OverlayMetricsRepository } from '../../src/infrastructure/persistence/overlay-metrics.repository';
 import { TenantModelFactory } from '../../src/infrastructure/persistence/tenant-model.factory';
 import { MetricType } from '../../src/domain/enums/metric-type.enum';
 import { TransformerService } from '../../src/modules/overlay-metrics-etl/transformer/transformer.service';
+import { METRIC_PIPELINES } from '@modules/overlay-metrics-etl/pipelines/pipelines.module';
+import type { MetricPipeline } from '@modules/overlay-metrics-etl/pipelines/metric-pipeline.interface';
+import type { PipelineContext } from '@modules/overlay-metrics-etl/pipelines/pipeline.context';
 import type { LatencyPercentileDto } from '../../src/domain/dto/latency-percentile.dto';
 import type { PlatformMetricDto } from '../../src/domain/dto/platform-metric.dto';
 
@@ -19,7 +21,12 @@ type PlatformBulkWriteOp = {
       intervalFrom: Date;
     };
     update: {
-      $inc: { sent: number; received: number; rendered: number; failed: number };
+      $inc: {
+        sent: number;
+        received: number;
+        rendered: number;
+        failed: number;
+      };
       $set: Partial<PlatformMetricDto>;
       $setOnInsert?: { createdAt: Date };
       $currentDate?: { updatedAt: true };
@@ -110,35 +117,37 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
         filter.intervalFrom.toISOString(),
       ].join('|');
 
-    const bulkWrite = jest.fn().mockImplementation(
-      async (
-        ops: PlatformBulkWriteOp[],
-        _options?: { ordered?: boolean },
-      ): Promise<{ acknowledged: boolean }> => {
-        for (const op of ops) {
-          const { filter, update, upsert } = op.updateOne;
-          const key = buildKey(filter);
-          const existing = docs.get(key);
+    const bulkWrite = jest
+      .fn()
+      .mockImplementation(
+        async (
+          ops: PlatformBulkWriteOp[],
+          _options?: { ordered?: boolean },
+        ): Promise<{ acknowledged: boolean }> => {
+          for (const op of ops) {
+            const { filter, update, upsert } = op.updateOne;
+            const key = buildKey(filter);
+            const existing = docs.get(key);
 
-          const nextDoc: StoredPlatformDoc = {
-            ...(existing ?? {}),
-            ...update.$set,
-            sent: (existing?.sent ?? 0) + update.$inc.sent,
-            received: (existing?.received ?? 0) + update.$inc.received,
-            rendered: (existing?.rendered ?? 0) + update.$inc.rendered,
-            failed: (existing?.failed ?? 0) + update.$inc.failed,
-            createdAt: existing?.createdAt ?? update.$setOnInsert?.createdAt,
-            updatedAt: new Date(),
-          } as StoredPlatformDoc;
+            const nextDoc: StoredPlatformDoc = {
+              ...(existing ?? {}),
+              ...update.$set,
+              sent: (existing?.sent ?? 0) + update.$inc.sent,
+              received: (existing?.received ?? 0) + update.$inc.received,
+              rendered: (existing?.rendered ?? 0) + update.$inc.rendered,
+              failed: (existing?.failed ?? 0) + update.$inc.failed,
+              createdAt: existing?.createdAt ?? update.$setOnInsert?.createdAt,
+              updatedAt: new Date(),
+            } as StoredPlatformDoc;
 
-          if (existing || upsert) {
-            docs.set(key, nextDoc);
+            if (existing || upsert) {
+              docs.set(key, nextDoc);
+            }
           }
-        }
 
-        return { acknowledged: true };
-      },
-    );
+          return { acknowledged: true };
+        },
+      );
 
     return {
       bulkWrite,
@@ -147,7 +156,9 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
     };
   };
 
-  const createScenario = async (platformRuns: PlatformMetricDto[][]): Promise<{
+  const createScenario = async (
+    platformRuns: PlatformMetricDto[][],
+  ): Promise<{
     moduleRef: TestingModule;
     timelineProcessor: TimelineProcessorService;
     extractor: { extractPlatformMetrics: jest.Mock };
@@ -159,13 +170,17 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
 
     const extractPlatformMetrics = jest.fn();
     platformRuns.forEach((_items, runIndex) => {
-      extractPlatformMetrics.mockResolvedValueOnce({ aggregations: { runIndex } });
+      extractPlatformMetrics.mockResolvedValueOnce({
+        aggregations: { runIndex },
+      });
     });
 
     const extractor = {
       extractPlatformMetrics,
       extractDeviceBreakdown: jest.fn().mockResolvedValue({ aggregations: {} }),
-      extractTransportComparison: jest.fn().mockResolvedValue({ aggregations: {} }),
+      extractTransportComparison: jest
+        .fn()
+        .mockResolvedValue({ aggregations: {} }),
       extractSdkVersions: jest.fn().mockResolvedValue({ aggregations: {} }),
       extractFailures: jest.fn().mockResolvedValue({ aggregations: {} }),
       extractLatency: jest.fn().mockResolvedValue({ aggregations: {} }),
@@ -187,12 +202,16 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
     };
 
     const tenantModelFactoryMock = {
-      getModelByType: jest.fn().mockImplementation((_tenantId: string, type: MetricType) => {
-        switch (type) {
-          case MetricType.PLATFORM: return platformModel;
-          default: return passiveModel;
-        }
-      }),
+      getModelByType: jest
+        .fn()
+        .mockImplementation((_tenantId: string, type: MetricType) => {
+          switch (type) {
+            case MetricType.PLATFORM:
+              return platformModel;
+            default:
+              return passiveModel;
+          }
+        }),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -200,8 +219,38 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
         TimelineProcessorService,
         LoaderService,
         OverlayMetricsRepository,
-        { provide: ExtractorService, useValue: extractor },
-        { provide: TransformerService, useValue: transformer },
+        {
+          provide: METRIC_PIPELINES,
+          useFactory: (loader: LoaderService) => [
+            {
+              type: MetricType.PLATFORM,
+              execute: jest
+                .fn()
+                .mockImplementation(async (ctx: PipelineContext) => {
+                  const result = await extractor.extractPlatformMetrics(
+                    ctx.query,
+                  );
+                  const data = transformer.transformPlatformMetrics(
+                    result.aggregations,
+                    ctx,
+                  );
+                  await loader.load(ctx.tenantId, MetricType.PLATFORM, data);
+                }),
+            } as MetricPipeline,
+            ...[
+              MetricType.DEVICE,
+              MetricType.TRANSPORT,
+              MetricType.SDK,
+              MetricType.FAILURE,
+              MetricType.LATENCY,
+              MetricType.TIMESERIES,
+            ].map((type) => ({
+              type,
+              execute: jest.fn().mockResolvedValue(undefined),
+            })),
+          ],
+          inject: [LoaderService],
+        },
         { provide: TenantModelFactory, useValue: tenantModelFactoryMock },
       ],
     }).compile();
@@ -210,15 +259,17 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
       moduleRef,
       timelineProcessor: moduleRef.get(TimelineProcessorService),
       extractor: { extractPlatformMetrics },
-      transformer: { transformPlatformMetrics: transformer.transformPlatformMetrics },
+      transformer: {
+        transformPlatformMetrics: transformer.transformPlatformMetrics,
+      },
       platformModel,
     };
   };
 
-  const stripAuditFields = (
-    items: StoredPlatformDoc[],
-  ): PlatformMetricDto[] =>
-    items.map(({ createdAt: _createdAt, updatedAt: _updatedAt, ...doc }) => doc);
+  const stripAuditFields = (items: StoredPlatformDoc[]): PlatformMetricDto[] =>
+    items.map(
+      ({ createdAt: _createdAt, updatedAt: _updatedAt, ...doc }) => doc,
+    );
 
   beforeEach(() => {
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
@@ -302,8 +353,13 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
       }),
     ];
 
-    const { moduleRef, timelineProcessor, extractor, transformer, platformModel } =
-      await createScenario([firstRunDocs, secondRunDocs]);
+    const {
+      moduleRef,
+      timelineProcessor,
+      extractor,
+      transformer,
+      platformModel,
+    } = await createScenario([firstRunDocs, secondRunDocs]);
 
     try {
       await timelineProcessor.processTimeline(payload);
@@ -316,8 +372,10 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
 
       expect(platformModel.bulkWrite).toHaveBeenCalledTimes(2);
 
-      const firstOps = platformModel.bulkWrite.mock.calls[0][0] as PlatformBulkWriteOp[];
-      const secondOps = platformModel.bulkWrite.mock.calls[1][0] as PlatformBulkWriteOp[];
+      const firstOps = platformModel.bulkWrite.mock
+        .calls[0][0] as PlatformBulkWriteOp[];
+      const secondOps = platformModel.bulkWrite.mock
+        .calls[1][0] as PlatformBulkWriteOp[];
 
       expect(firstOps).toHaveLength(3);
       expect(secondOps).toHaveLength(3);
@@ -330,7 +388,9 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
           platform,
           intervalFrom,
         });
-        expect(secondOps[index].updateOne.filter).toEqual(firstOps[index].updateOne.filter);
+        expect(secondOps[index].updateOne.filter).toEqual(
+          firstOps[index].updateOne.filter,
+        );
       }
 
       // Accumulate: raw counts cộng dồn, derived metrics lấy giá trị mới nhất
@@ -455,10 +515,8 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
       }),
     ];
 
-    const { moduleRef, timelineProcessor, platformModel } = await createScenario([
-      firstRunDocs,
-      secondRunDocs,
-    ]);
+    const { moduleRef, timelineProcessor, platformModel } =
+      await createScenario([firstRunDocs, secondRunDocs]);
 
     try {
       await timelineProcessor.processTimeline(payload);
@@ -466,7 +524,8 @@ describe('UC-13 - Idempotent rerun cho cùng interval', () => {
 
       await timelineProcessor.processTimeline(payload);
 
-      const secondOps = platformModel.bulkWrite.mock.calls[1][0] as PlatformBulkWriteOp[];
+      const secondOps = platformModel.bulkWrite.mock
+        .calls[1][0] as PlatformBulkWriteOp[];
 
       expect(secondOps).toHaveLength(4);
       expect(secondOps).toEqual(

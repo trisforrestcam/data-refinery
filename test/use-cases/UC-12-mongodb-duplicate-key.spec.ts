@@ -1,17 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { MongoServerError } from 'mongodb';
-import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extractor.service';
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
 import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
 import { OverlayMetricsRepository } from '@infrastructure/persistence/overlay-metrics.repository';
 import { TenantModelFactory } from '@infrastructure/persistence/tenant-model.factory';
 import { MetricType } from '@domain/enums/metric-type.enum';
 import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
-import type {
-  DeviceBreakdownDto,
-  PlatformMetricDto,
-} from '@domain/dto';
+import { METRIC_PIPELINES } from '@modules/overlay-metrics-etl/pipelines/pipelines.module';
+import type { MetricPipeline } from '@modules/overlay-metrics-etl/pipelines/metric-pipeline.interface';
+import type { PipelineContext } from '@modules/overlay-metrics-etl/pipelines/pipeline.context';
+import type { DeviceBreakdownDto, PlatformMetricDto } from '@domain/dto';
 
 type MockModel = {
   bulkWrite: jest.Mock;
@@ -74,17 +73,26 @@ const createModels = (): ModelMap => ({
 });
 
 const createTenantModelFactoryMock = (models: ModelMap) => ({
-  getModelByType: jest.fn().mockImplementation((_tenantId: string, type: MetricType) => {
-    switch (type) {
-      case MetricType.PLATFORM: return models.platformModel;
-      case MetricType.DEVICE: return models.deviceModel;
-      case MetricType.TRANSPORT: return models.transportModel;
-      case MetricType.SDK: return models.sdkModel;
-      case MetricType.FAILURE: return models.failureModel;
-      case MetricType.TIMESERIES: return models.timeseriesModel;
-      case MetricType.LATENCY: return models.latencyModel;
-    }
-  }),
+  getModelByType: jest
+    .fn()
+    .mockImplementation((_tenantId: string, type: MetricType) => {
+      switch (type) {
+        case MetricType.PLATFORM:
+          return models.platformModel;
+        case MetricType.DEVICE:
+          return models.deviceModel;
+        case MetricType.TRANSPORT:
+          return models.transportModel;
+        case MetricType.SDK:
+          return models.sdkModel;
+        case MetricType.FAILURE:
+          return models.failureModel;
+        case MetricType.TIMESERIES:
+          return models.timeseriesModel;
+        case MetricType.LATENCY:
+          return models.latencyModel;
+      }
+    }),
 });
 
 const createModelProviders = (models: ModelMap) => [
@@ -96,7 +104,11 @@ const createModelProviders = (models: ModelMap) => [
 
 const buildLoaderModule = async (models: ModelMap): Promise<TestingModule> =>
   Test.createTestingModule({
-    providers: [LoaderService, OverlayMetricsRepository, ...createModelProviders(models)],
+    providers: [
+      LoaderService,
+      OverlayMetricsRepository,
+      ...createModelProviders(models),
+    ],
   }).compile();
 
 describe('UC-12 - MongoDB duplicate key khi upsert', () => {
@@ -119,33 +131,38 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
 
     models.platformModel.bulkWrite.mockRejectedValue(duplicateKeyError);
 
-    const extractor = {
-      extractPlatformMetrics: jest.fn().mockResolvedValue({ aggregations: {} }),
-      extractDeviceBreakdown: jest.fn(),
-      extractTransportComparison: jest.fn(),
-      extractSdkVersions: jest.fn(),
-      extractFailures: jest.fn(),
-      extractLatency: jest.fn(),
-      extractTimeseries: jest.fn(),
-    };
-
-    const transformer = {
-      transformPlatformMetrics: jest.fn().mockReturnValue([platformItem]),
-      transformDeviceBreakdown: jest.fn(),
-      transformTransportComparison: jest.fn(),
-      transformSdkVersions: jest.fn(),
-      transformFailures: jest.fn(),
-      transformLatency: jest.fn(),
-      transformTimeseries: jest.fn(),
-    };
-
     moduleRef = await Test.createTestingModule({
       providers: [
         TimelineProcessorService,
         LoaderService,
         OverlayMetricsRepository,
-        { provide: ExtractorService, useValue: extractor },
-        { provide: TransformerService, useValue: transformer },
+        {
+          provide: METRIC_PIPELINES,
+          useFactory: (loader: LoaderService) => [
+            {
+              type: MetricType.PLATFORM,
+              execute: jest
+                .fn()
+                .mockImplementation(async (ctx: PipelineContext) => {
+                  await loader.load(ctx.tenantId, MetricType.PLATFORM, [
+                    platformItem,
+                  ]);
+                }),
+            } as MetricPipeline,
+            ...[
+              MetricType.DEVICE,
+              MetricType.TRANSPORT,
+              MetricType.SDK,
+              MetricType.FAILURE,
+              MetricType.LATENCY,
+              MetricType.TIMESERIES,
+            ].map((type) => ({
+              type,
+              execute: jest.fn().mockResolvedValue(undefined),
+            })),
+          ],
+          inject: [LoaderService],
+        },
         ...createModelProviders(models),
       ],
     }).compile();
@@ -160,8 +177,10 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
       intervalTo: platformItem.intervalTo.toISOString(),
     };
 
-    // TimelineProcessorService throws khi pipeline step fail để Kafka consumer xử lý retry/DLQ
-    await expect(timelineProcessor.processTimeline(payload)).rejects.toThrow(MongoServerError);
+    // TimelineProcessorService catches pipeline errors và throws tổng hợp để Kafka consumer xử lý retry/DLQ
+    await expect(timelineProcessor.processTimeline(payload)).rejects.toThrow(
+      /failed pipelines: platform/,
+    );
 
     expect(models.platformModel.bulkWrite).toHaveBeenCalledTimes(1);
     expect(models.platformModel.bulkWrite).toHaveBeenCalledWith(
@@ -180,15 +199,22 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
       ],
       { ordered: false },
     );
-    expect(extractor.extractDeviceBreakdown).not.toHaveBeenCalled();
     expect(duplicateKeyError.code).toBe(11000);
   });
 
   it('upsert platform idempotent: lần 1 insert, lần 2 update cùng filter và không throw', async () => {
     const models = createModels();
     models.platformModel.bulkWrite
-      .mockResolvedValueOnce({ upsertedCount: 1, matchedCount: 0, modifiedCount: 0 })
-      .mockResolvedValueOnce({ upsertedCount: 0, matchedCount: 1, modifiedCount: 1 });
+      .mockResolvedValueOnce({
+        upsertedCount: 1,
+        matchedCount: 0,
+        modifiedCount: 0,
+      })
+      .mockResolvedValueOnce({
+        upsertedCount: 0,
+        matchedCount: 1,
+        modifiedCount: 1,
+      });
 
     moduleRef = await buildLoaderModule(models);
     const loader = moduleRef.get(LoaderService);
@@ -200,9 +226,13 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
       avgRenderMs: 49,
     };
 
-    await expect(loader.loadPlatformMetrics(platformItem.tenantId, [platformItem])).resolves.toBeUndefined();
     await expect(
-      loader.loadPlatformMetrics(platformItem.tenantId, [updatedPlatformItem]),
+      loader.load(platformItem.tenantId, MetricType.PLATFORM, [platformItem]),
+    ).resolves.toBeUndefined();
+    await expect(
+      loader.load(platformItem.tenantId, MetricType.PLATFORM, [
+        updatedPlatformItem,
+      ]),
     ).resolves.toBeUndefined();
 
     expect(models.platformModel.bulkWrite).toHaveBeenCalledTimes(2);
@@ -218,7 +248,12 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
     });
     expect(firstOp.updateOne.update).toEqual(
       expect.objectContaining({
-        $inc: { sent: platformItem.sent, received: platformItem.received, rendered: platformItem.rendered, failed: platformItem.failed },
+        $inc: {
+          sent: platformItem.sent,
+          received: platformItem.received,
+          rendered: platformItem.rendered,
+          failed: platformItem.failed,
+        },
         $set: expect.objectContaining({
           timelineId: platformItem.timelineId,
           matchId: platformItem.matchId,
@@ -241,7 +276,12 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
     expect(secondOp.updateOne.filter).toEqual(firstOp.updateOne.filter);
     expect(secondOp.updateOne.update).toEqual(
       expect.objectContaining({
-        $inc: { sent: updatedPlatformItem.sent, received: updatedPlatformItem.received, rendered: updatedPlatformItem.rendered, failed: updatedPlatformItem.failed },
+        $inc: {
+          sent: updatedPlatformItem.sent,
+          received: updatedPlatformItem.received,
+          rendered: updatedPlatformItem.rendered,
+          failed: updatedPlatformItem.failed,
+        },
         $set: expect.objectContaining({
           avgRenderMs: updatedPlatformItem.avgRenderMs,
         }),
@@ -262,8 +302,16 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
   it('buildUpsertOps cho device dùng uniqueFields khác platform và vẫn update với upsert:true', async () => {
     const models = createModels();
     models.deviceModel.bulkWrite
-      .mockResolvedValueOnce({ upsertedCount: 1, matchedCount: 0, modifiedCount: 0 })
-      .mockResolvedValueOnce({ upsertedCount: 0, matchedCount: 1, modifiedCount: 1 });
+      .mockResolvedValueOnce({
+        upsertedCount: 1,
+        matchedCount: 0,
+        modifiedCount: 0,
+      })
+      .mockResolvedValueOnce({
+        upsertedCount: 0,
+        matchedCount: 1,
+        modifiedCount: 1,
+      });
 
     moduleRef = await buildLoaderModule(models);
     const loader = moduleRef.get(LoaderService);
@@ -274,9 +322,11 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
       avgRenderMs: 41,
     };
 
-    await expect(loader.loadDeviceBreakdown(deviceItem.tenantId, [deviceItem])).resolves.toBeUndefined();
     await expect(
-      loader.loadDeviceBreakdown(deviceItem.tenantId, [updatedDeviceItem]),
+      loader.load(deviceItem.tenantId, MetricType.DEVICE, [deviceItem]),
+    ).resolves.toBeUndefined();
+    await expect(
+      loader.load(deviceItem.tenantId, MetricType.DEVICE, [updatedDeviceItem]),
     ).resolves.toBeUndefined();
 
     expect(models.deviceModel.bulkWrite).toHaveBeenCalledTimes(2);
@@ -294,7 +344,11 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
     expect(firstOp.updateOne.filter).not.toHaveProperty('platform');
     expect(firstOp.updateOne.update).toEqual(
       expect.objectContaining({
-        $inc: { received: deviceItem.received, rendered: deviceItem.rendered, failed: deviceItem.failed },
+        $inc: {
+          received: deviceItem.received,
+          rendered: deviceItem.rendered,
+          failed: deviceItem.failed,
+        },
         $set: expect.objectContaining({
           timelineId: deviceItem.timelineId,
           matchId: deviceItem.matchId,
@@ -315,7 +369,11 @@ describe('UC-12 - MongoDB duplicate key khi upsert', () => {
     expect(secondOp.updateOne.filter).toEqual(firstOp.updateOne.filter);
     expect(secondOp.updateOne.update).toEqual(
       expect.objectContaining({
-        $inc: { received: updatedDeviceItem.received, rendered: updatedDeviceItem.rendered, failed: updatedDeviceItem.failed },
+        $inc: {
+          received: updatedDeviceItem.received,
+          rendered: updatedDeviceItem.rendered,
+          failed: updatedDeviceItem.failed,
+        },
         $set: expect.objectContaining({
           avgRenderMs: updatedDeviceItem.avgRenderMs,
         }),

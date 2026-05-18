@@ -2,7 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { ElasticsearchService } from '@nestjs/elasticsearch';
 import { getModelToken } from '@nestjs/mongoose';
-import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extractor.service';
 import { TrackingAggQuery } from '@modules/overlay-metrics-etl/extractor/dto/tracking-agg-query.dto';
 import { TrackingEsService } from '@modules/overlay-metrics-etl/extractor/elasticsearch/tracking-es.service';
 import { DeviceBreakdownAggs } from '@modules/overlay-metrics-etl/extractor/elasticsearch/types/tracking-es-aggs.types';
@@ -30,7 +29,6 @@ type ModelMock = {
 
 describe('UC-03 Device breakdown use case', () => {
   let moduleRef: TestingModule;
-  let extractor: ExtractorService;
   let trackingEs: TrackingEsService;
   let transformer: TransformerService;
   let loader: LoaderService;
@@ -87,17 +85,14 @@ describe('UC-03 Device breakdown use case', () => {
     const loadedByDimension: DeviceBreakdownDto[][] = [];
 
     for (const dimension of dimensions) {
-      const deviceAgg = await extractor.extractDeviceBreakdown(
-        query,
-        dimension,
-      );
+      const deviceAgg = await trackingEs.queryDeviceBreakdown(query, dimension);
       const items = transformer.transformDeviceBreakdown(
         deviceAgg.aggregations,
         ctx,
         dimension,
       );
 
-      await loader.loadDeviceBreakdown(ctx.tenantId, items);
+      await loader.load(ctx.tenantId, MetricType.DEVICE, items);
       loadedByDimension.push(items);
     }
 
@@ -119,15 +114,16 @@ describe('UC-03 Device breakdown use case', () => {
     });
 
     const tenantModelFactoryMock = {
-      getModelByType: jest.fn().mockImplementation((_tenantId: string, type: MetricType) => {
-        if (type === MetricType.DEVICE) return deviceModel;
-        return createModelMock();
-      }),
+      getModelByType: jest
+        .fn()
+        .mockImplementation((_tenantId: string, type: MetricType) => {
+          if (type === MetricType.DEVICE) return deviceModel;
+          return createModelMock();
+        }),
     };
 
     moduleRef = await Test.createTestingModule({
       providers: [
-        ExtractorService,
         TrackingEsService,
         TransformerService,
         LoaderService,
@@ -138,7 +134,6 @@ describe('UC-03 Device breakdown use case', () => {
       ],
     }).compile();
 
-    extractor = moduleRef.get(ExtractorService);
     trackingEs = moduleRef.get(TrackingEsService);
     transformer = moduleRef.get(TransformerService);
     loader = moduleRef.get(LoaderService);
@@ -233,7 +228,7 @@ describe('UC-03 Device breakdown use case', () => {
         ),
       );
 
-    const loadSpy = jest.spyOn(loader, 'loadDeviceBreakdown');
+    const loadSpy = jest.spyOn(loader, 'load');
 
     const loadedItems = await runDeviceBreakdownLoop();
 
@@ -379,20 +374,34 @@ describe('UC-03 Device breakdown use case', () => {
       expectedOsItems,
       expectedDeviceClassItems,
     ]);
-    expect(loadSpy).toHaveBeenNthCalledWith(1, ctx.tenantId, expectedBrowserItems);
-    expect(loadSpy).toHaveBeenNthCalledWith(2, ctx.tenantId, expectedOsItems);
-    expect(loadSpy).toHaveBeenNthCalledWith(3, ctx.tenantId, expectedDeviceClassItems);
+    expect(loadSpy).toHaveBeenNthCalledWith(
+      1,
+      ctx.tenantId,
+      MetricType.DEVICE,
+      expectedBrowserItems,
+    );
+    expect(loadSpy).toHaveBeenNthCalledWith(
+      2,
+      ctx.tenantId,
+      MetricType.DEVICE,
+      expectedOsItems,
+    );
+    expect(loadSpy).toHaveBeenNthCalledWith(
+      3,
+      ctx.tenantId,
+      MetricType.DEVICE,
+      expectedDeviceClassItems,
+    );
 
     expect(
       esSearchMock.mock.calls.map(
-        ([request]) => (request as any).aggs.by_dimension.terms.field as string,
+        ([request]) => request.aggs.by_dimension.terms.field as string,
       ),
     ).toEqual(['labels.browser', 'labels.client_os', 'labels.device_class']);
 
     expect(
       esSearchMock.mock.calls.map(
-        ([request]) =>
-          (request as any).aggs.by_dimension.terms.missing as string,
+        ([request]) => request.aggs.by_dimension.terms.missing as string,
       ),
     ).toEqual(['unknown', 'unknown', 'unknown']);
 
@@ -420,9 +429,9 @@ describe('UC-03 Device breakdown use case', () => {
     await trackingEs.queryDeviceBreakdown(query, 'unsupported-dimension');
 
     expect(esSearchMock).toHaveBeenCalledTimes(1);
-    expect(
-      (esSearchMock.mock.calls[0][0] as any).aggs.by_dimension.terms.field,
-    ).toBe('labels.browser');
+    expect(esSearchMock.mock.calls[0][0].aggs.by_dimension.terms.field).toBe(
+      'labels.browser',
+    );
   });
 
   it('loads an empty array for an empty dimension and LoaderService returns before bulkWrite', async () => {
@@ -439,12 +448,17 @@ describe('UC-03 Device breakdown use case', () => {
         ),
       );
 
-    const loadSpy = jest.spyOn(loader, 'loadDeviceBreakdown');
+    const loadSpy = jest.spyOn(loader, 'load');
 
     const loadedItems = await runDeviceBreakdownLoop();
 
     expect(loadedItems[1]).toEqual([]);
-    expect(loadSpy).toHaveBeenNthCalledWith(2, ctx.tenantId, []);
+    expect(loadSpy).toHaveBeenNthCalledWith(
+      2,
+      ctx.tenantId,
+      MetricType.DEVICE,
+      [],
+    );
     expect(deviceModel.bulkWrite).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,10 +1,19 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
-import { ExtractorService } from '../../src/modules/overlay-metrics-etl/extractor/extractor.service';
 import { TrackingEsService } from '../../src/modules/overlay-metrics-etl/extractor/elasticsearch/tracking-es.service';
 import { TransformerService } from '../../src/modules/overlay-metrics-etl/transformer/transformer.service';
 import { LoaderService } from '../../src/modules/overlay-metrics-etl/loader/loader.service';
 import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
+import { METRIC_PIPELINES } from '@modules/overlay-metrics-etl/pipelines/pipelines.module';
+import {
+  PlatformPipeline,
+  DevicePipeline,
+  TransportPipeline,
+  SdkPipeline,
+  FailurePipeline,
+  LatencyPipeline,
+  TimeseriesPipeline,
+} from '@modules/overlay-metrics-etl/pipelines';
 import { OverlayMetricsRepository } from '../../src/infrastructure/persistence/overlay-metrics.repository';
 import { TenantModelFactory } from '../../src/infrastructure/persistence/tenant-model.factory';
 import { MetricType } from '../../src/domain/enums/metric-type.enum';
@@ -31,16 +40,7 @@ type TrackingEsMock = Record<
   | 'queryTimeseries',
   jest.Mock
 >;
-type LoaderMock = Record<
-  | 'loadPlatformMetrics'
-  | 'loadDeviceBreakdown'
-  | 'loadTransportComparison'
-  | 'loadSdkVersions'
-  | 'loadFailures'
-  | 'loadLatency'
-  | 'loadTimeseries',
-  jest.Mock
->;
+type LoaderMock = Record<'load', jest.Mock>;
 
 describe('UC-09 - Empty window không có events trong 5 phút', () => {
   const intervalFrom = new Date('2026-05-13T10:00:00.000Z');
@@ -110,17 +110,26 @@ describe('UC-09 - Empty window không có events trong 5 phút', () => {
     const latencyModel = createModel();
 
     const tenantModelFactoryMock = {
-      getModelByType: jest.fn().mockImplementation((_tenantId: string, type: MetricType) => {
-        switch (type) {
-          case MetricType.PLATFORM: return platformModel;
-          case MetricType.DEVICE: return deviceModel;
-          case MetricType.TRANSPORT: return transportModel;
-          case MetricType.SDK: return sdkModel;
-          case MetricType.FAILURE: return failureModel;
-          case MetricType.TIMESERIES: return timeseriesModel;
-          case MetricType.LATENCY: return latencyModel;
-        }
-      }),
+      getModelByType: jest
+        .fn()
+        .mockImplementation((_tenantId: string, type: MetricType) => {
+          switch (type) {
+            case MetricType.PLATFORM:
+              return platformModel;
+            case MetricType.DEVICE:
+              return deviceModel;
+            case MetricType.TRANSPORT:
+              return transportModel;
+            case MetricType.SDK:
+              return sdkModel;
+            case MetricType.FAILURE:
+              return failureModel;
+            case MetricType.TIMESERIES:
+              return timeseriesModel;
+            case MetricType.LATENCY:
+              return latencyModel;
+          }
+        }),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -132,13 +141,13 @@ describe('UC-09 - Empty window không có events trong 5 phút', () => {
     }).compile();
     const loader = moduleRef.get(LoaderService);
 
-    await loader.loadPlatformMetrics(ctx.tenantId, []);
-    await loader.loadDeviceBreakdown(ctx.tenantId, []);
-    await loader.loadTransportComparison(ctx.tenantId, []);
-    await loader.loadSdkVersions(ctx.tenantId, []);
-    await loader.loadFailures(ctx.tenantId, []);
-    await loader.loadTimeseries(ctx.tenantId, []);
-    await loader.loadLatency(ctx.tenantId, []);
+    await loader.load(ctx.tenantId, MetricType.PLATFORM, []);
+    await loader.load(ctx.tenantId, MetricType.DEVICE, []);
+    await loader.load(ctx.tenantId, MetricType.TRANSPORT, []);
+    await loader.load(ctx.tenantId, MetricType.SDK, []);
+    await loader.load(ctx.tenantId, MetricType.FAILURE, []);
+    await loader.load(ctx.tenantId, MetricType.LATENCY, []);
+    await loader.load(ctx.tenantId, MetricType.TIMESERIES, []);
 
     expect(platformModel.bulkWrite).not.toHaveBeenCalled();
     expect(deviceModel.bulkWrite).not.toHaveBeenCalled();
@@ -163,22 +172,43 @@ describe('UC-09 - Empty window không có events trong 5 phút', () => {
       queryTimeseries: jest.fn().mockResolvedValue(emptyResult),
     };
     const loaderMock: LoaderMock = {
-      loadPlatformMetrics: jest.fn().mockResolvedValue(undefined),
-      loadDeviceBreakdown: jest.fn().mockResolvedValue(undefined),
-      loadTransportComparison: jest.fn().mockResolvedValue(undefined),
-      loadSdkVersions: jest.fn().mockResolvedValue(undefined),
-      loadFailures: jest.fn().mockResolvedValue(undefined),
-      loadLatency: jest.fn().mockResolvedValue(undefined),
-      loadTimeseries: jest.fn().mockResolvedValue(undefined),
+      load: jest.fn().mockResolvedValue(undefined),
     };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         TimelineProcessorService,
-        ExtractorService,
+        PlatformPipeline,
+        DevicePipeline,
+        TransportPipeline,
+        SdkPipeline,
+        FailurePipeline,
+        LatencyPipeline,
+        TimeseriesPipeline,
         TransformerService,
         { provide: TrackingEsService, useValue: trackingEsMock },
         { provide: LoaderService, useValue: loaderMock },
+        {
+          provide: METRIC_PIPELINES,
+          useFactory: (
+            platform: PlatformPipeline,
+            device: DevicePipeline,
+            transport: TransportPipeline,
+            sdk: SdkPipeline,
+            failure: FailurePipeline,
+            latency: LatencyPipeline,
+            timeseries: TimeseriesPipeline,
+          ) => [platform, device, transport, sdk, failure, latency, timeseries],
+          inject: [
+            PlatformPipeline,
+            DevicePipeline,
+            TransportPipeline,
+            SdkPipeline,
+            FailurePipeline,
+            LatencyPipeline,
+            TimeseriesPipeline,
+          ],
+        },
       ],
     }).compile();
     const timelineProcessor = moduleRef.get(TimelineProcessorService);
@@ -192,7 +222,9 @@ describe('UC-09 - Empty window không có events trong 5 phút', () => {
       intervalTo: intervalTo.toISOString(),
     };
 
-    await expect(timelineProcessor.processTimeline(payload)).resolves.toBeUndefined();
+    await expect(
+      timelineProcessor.processTimeline(payload),
+    ).resolves.toBeUndefined();
 
     const expectedQuery = {
       timelineIds: [ctx.timelineId],
@@ -227,23 +259,12 @@ describe('UC-09 - Empty window không có events trong 5 phút', () => {
     expect(trackingEsMock.queryLatency).toHaveBeenCalledWith(expectedQuery);
     expect(trackingEsMock.queryTimeseries).toHaveBeenCalledTimes(5);
 
-    expect(loaderMock.loadPlatformMetrics).toHaveBeenCalledWith(ctx.tenantId, []);
-    expect(loaderMock.loadDeviceBreakdown).toHaveBeenCalledTimes(3);
-    for (const call of loaderMock.loadDeviceBreakdown.mock.calls) {
-      expect(call[0]).toEqual(ctx.tenantId);
-      expect(call[1]).toEqual([]);
-    }
-    expect(loaderMock.loadTransportComparison).toHaveBeenCalledWith(ctx.tenantId, []);
-    expect(loaderMock.loadSdkVersions).toHaveBeenCalledWith(ctx.tenantId, []);
-    expect(loaderMock.loadFailures).toHaveBeenCalledWith(ctx.tenantId, []);
-    expect(loaderMock.loadTimeseries).toHaveBeenCalledTimes(5);
-    for (const call of loaderMock.loadTimeseries.mock.calls) {
-      expect(call[0]).toEqual(ctx.tenantId);
-      expect(call[1]).toEqual([]);
-    }
-
-    expect(loaderMock.loadLatency).toHaveBeenCalledTimes(1);
-    const latencyItems = loaderMock.loadLatency.mock.calls[0][1] as LatencyPercentileDto[];
+    expect(loaderMock.load).toHaveBeenCalledTimes(13);
+    const latencyCall = loaderMock.load.mock.calls.find(
+      (call) => call[1] === MetricType.LATENCY,
+    );
+    expect(latencyCall).toBeDefined();
+    const latencyItems = latencyCall![2] as LatencyPercentileDto[];
     expect(latencyItems).toHaveLength(1);
     expect(latencyItems[0]).toEqual({
       timelineId: ctx.timelineId,
@@ -256,6 +277,13 @@ describe('UC-09 - Empty window không có events trong 5 phút', () => {
       intervalFrom,
       intervalTo,
     });
+    const emptyCalls = loaderMock.load.mock.calls.filter(
+      (call) => (call[2] as unknown[]).length === 0,
+    );
+    expect(emptyCalls.length).toBe(12);
+    for (const call of loaderMock.load.mock.calls) {
+      expect(call[0]).toEqual(ctx.tenantId);
+    }
 
     await moduleRef.close();
   });

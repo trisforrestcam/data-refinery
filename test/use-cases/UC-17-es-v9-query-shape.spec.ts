@@ -38,7 +38,10 @@ const expectedBaseQuery = {
   },
 };
 
-type SearchCall = [Record<string, unknown>, Record<string, unknown> | undefined];
+type SearchCall = [
+  Record<string, unknown>,
+  Record<string, unknown> | undefined,
+];
 
 describe('UC-17 ES v9 query shape use case', () => {
   let moduleRef: TestingModule;
@@ -79,7 +82,9 @@ describe('UC-17 ES v9 query shape use case', () => {
     await moduleRef.close();
   });
 
-  const expectFlatSearchRequest = (expectedRequest: Record<string, unknown>) => {
+  const expectFlatSearchRequest = (
+    expectedRequest: Record<string, unknown>,
+  ) => {
     expect(esSearchMock).toHaveBeenCalledTimes(1);
 
     const [request, options] = esSearchMock.mock.calls[0] as SearchCall;
@@ -380,10 +385,7 @@ describe('UC-17 ES v9 query shape use case', () => {
     ['received', { filter: { term: { 'labels.stage': 'received' } } }],
     ['rendered', { filter: { term: { 'labels.stage': 'rendered' } } }],
     ['failed', { filter: { term: { 'labels.stage': 'render-failed' } } }],
-    [
-      'avgRenderMs',
-      { avg: { field: 'numeric_labels.render_duration_ms' } },
-    ],
+    ['avgRenderMs', { avg: { field: 'numeric_labels.render_duration_ms' } }],
   ])(
     'queryTimeseries uses fixed_interval and metric_value agg for %s',
     async (metric: string, expectedMetricAgg: Record<string, unknown>) => {

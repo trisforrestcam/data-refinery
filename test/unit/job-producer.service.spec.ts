@@ -35,8 +35,16 @@ describe('JobProducerService', () => {
   describe('handleCron', () => {
     it('2 targets với 3 timelines mỗi target → 6 sendJob calls', async () => {
       schedulerConfig.getActiveTargets.mockResolvedValue([
-        { tenantId: 'tenant-a', matchId: 'match-1', timelineIds: ['tl-1', 'tl-2', 'tl-3'] },
-        { tenantId: 'tenant-b', matchId: 'match-2', timelineIds: ['tl-4', 'tl-5', 'tl-6'] },
+        {
+          tenantId: 'tenant-a',
+          matchId: 'match-1',
+          timelineIds: ['tl-1', 'tl-2', 'tl-3'],
+        },
+        {
+          tenantId: 'tenant-b',
+          matchId: 'match-2',
+          timelineIds: ['tl-4', 'tl-5', 'tl-6'],
+        },
       ]);
 
       await service.handleCron();
@@ -46,25 +54,65 @@ describe('JobProducerService', () => {
       const calls = kafkaProducer.sendJob.mock.calls.map((c) => c[0]);
       expect(calls).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ tenantId: 'tenant-a', matchId: 'match-1', timelineId: 'tl-1', timeRangeMinutes: 60, origin: 'scheduled' }),
-          expect.objectContaining({ tenantId: 'tenant-a', matchId: 'match-1', timelineId: 'tl-2', timeRangeMinutes: 60, origin: 'scheduled' }),
-          expect.objectContaining({ tenantId: 'tenant-a', matchId: 'match-1', timelineId: 'tl-3', timeRangeMinutes: 60, origin: 'scheduled' }),
-          expect.objectContaining({ tenantId: 'tenant-b', matchId: 'match-2', timelineId: 'tl-4', timeRangeMinutes: 60, origin: 'scheduled' }),
-          expect.objectContaining({ tenantId: 'tenant-b', matchId: 'match-2', timelineId: 'tl-5', timeRangeMinutes: 60, origin: 'scheduled' }),
-          expect.objectContaining({ tenantId: 'tenant-b', matchId: 'match-2', timelineId: 'tl-6', timeRangeMinutes: 60, origin: 'scheduled' }),
+          expect.objectContaining({
+            tenantId: 'tenant-a',
+            matchId: 'match-1',
+            timelineId: 'tl-1',
+            timeRangeMinutes: 60,
+            origin: 'scheduled',
+          }),
+          expect.objectContaining({
+            tenantId: 'tenant-a',
+            matchId: 'match-1',
+            timelineId: 'tl-2',
+            timeRangeMinutes: 60,
+            origin: 'scheduled',
+          }),
+          expect.objectContaining({
+            tenantId: 'tenant-a',
+            matchId: 'match-1',
+            timelineId: 'tl-3',
+            timeRangeMinutes: 60,
+            origin: 'scheduled',
+          }),
+          expect.objectContaining({
+            tenantId: 'tenant-b',
+            matchId: 'match-2',
+            timelineId: 'tl-4',
+            timeRangeMinutes: 60,
+            origin: 'scheduled',
+          }),
+          expect.objectContaining({
+            tenantId: 'tenant-b',
+            matchId: 'match-2',
+            timelineId: 'tl-5',
+            timeRangeMinutes: 60,
+            origin: 'scheduled',
+          }),
+          expect.objectContaining({
+            tenantId: 'tenant-b',
+            matchId: 'match-2',
+            timelineId: 'tl-6',
+            timeRangeMinutes: 60,
+            origin: 'scheduled',
+          }),
         ]),
       );
     });
 
     it('0 targets → không gọi sendJob và log warning', async () => {
       schedulerConfig.getActiveTargets.mockResolvedValue([]);
-      const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const warnSpy = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
 
       await service.handleCron();
 
       expect(kafkaProducer.sendJob).not.toHaveBeenCalled();
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Overlay metrics scheduler: no active targets found'),
+        expect.stringContaining(
+          'Overlay metrics scheduler: no active targets found',
+        ),
       );
     });
 
@@ -102,26 +150,32 @@ describe('JobProducerService', () => {
       const result = await service.triggerBackfill('tenant-001', dto);
 
       expect(kafkaProducer.sendJob).toHaveBeenCalledTimes(2);
-      expect(kafkaProducer.sendJob).toHaveBeenNthCalledWith(1, expect.objectContaining({
-        tenantId: 'tenant-001',
-        matchId: 'match-123',
-        timelineId: 'tl-backfill-1',
-        timeRangeMinutes: 5,
-        intervalFrom: '2024-01-01T00:00:00Z',
-        intervalTo: '2024-01-01T00:05:00Z',
-        origin: 'backfill',
-        correlationId: expect.any(String),
-      }));
-      expect(kafkaProducer.sendJob).toHaveBeenNthCalledWith(2, expect.objectContaining({
-        tenantId: 'tenant-001',
-        matchId: 'match-123',
-        timelineId: 'tl-backfill-2',
-        timeRangeMinutes: 5,
-        intervalFrom: '2024-01-01T00:00:00Z',
-        intervalTo: '2024-01-01T00:05:00Z',
-        origin: 'backfill',
-        correlationId: expect.any(String),
-      }));
+      expect(kafkaProducer.sendJob).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          tenantId: 'tenant-001',
+          matchId: 'match-123',
+          timelineId: 'tl-backfill-1',
+          timeRangeMinutes: 5,
+          intervalFrom: '2024-01-01T00:00:00Z',
+          intervalTo: '2024-01-01T00:05:00Z',
+          origin: 'backfill',
+          correlationId: expect.any(String),
+        }),
+      );
+      expect(kafkaProducer.sendJob).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          tenantId: 'tenant-001',
+          matchId: 'match-123',
+          timelineId: 'tl-backfill-2',
+          timeRangeMinutes: 5,
+          intervalFrom: '2024-01-01T00:00:00Z',
+          intervalTo: '2024-01-01T00:05:00Z',
+          origin: 'backfill',
+          correlationId: expect.any(String),
+        }),
+      );
 
       // Cả 2 message dùng chung correlationId
       const firstCall = kafkaProducer.sendJob.mock.calls[0][0];

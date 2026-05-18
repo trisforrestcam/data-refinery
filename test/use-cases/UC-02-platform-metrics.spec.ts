@@ -6,6 +6,7 @@ import { TrackingEsService } from '@modules/overlay-metrics-etl/extractor/elasti
 import type { PlatformMetricsAggs } from '@modules/overlay-metrics-etl/extractor/elasticsearch/types/tracking-es-aggs.types';
 import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
 import type { PlatformMetricDto } from '@domain/dto/platform-metric.dto';
+import { MetricType } from '@domain/enums/metric-type.enum';
 import {
   TransformerService,
   type TransformContext,
@@ -39,12 +40,15 @@ type EsSearchRequest = {
 describe('UC-02: Platform metrics cho một trận đấu', () => {
   let trackingEsService: TrackingEsService;
   let transformerService: TransformerService;
-  let loaderService: Pick<LoaderService, 'loadPlatformMetrics'>;
+  let loaderService: Pick<LoaderService, 'load'>;
   let esSearchMock: jest.Mock<
     Promise<EsSearchResult>,
     [EsSearchRequest, object]
   >;
-  let loadPlatformMetricsMock: jest.Mock<Promise<void>, [string, PlatformMetricDto[]]>;
+  let loadMock: jest.Mock<
+    Promise<void>,
+    [string, MetricType, PlatformMetricDto[]]
+  >;
 
   const intervalFrom = new Date('2026-05-13T10:00:00.000Z');
   const intervalTo = new Date('2026-05-13T10:05:00.000Z');
@@ -67,7 +71,7 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
 
   beforeEach(async () => {
     esSearchMock = jest.fn();
-    loadPlatformMetricsMock = jest.fn().mockResolvedValue(undefined);
+    loadMock = jest.fn().mockResolvedValue(undefined);
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
@@ -96,7 +100,7 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
         {
           provide: LoaderService,
           useValue: {
-            loadPlatformMetrics: loadPlatformMetricsMock,
+            load: loadMock,
           },
         },
       ],
@@ -143,7 +147,7 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
       extracted.aggregations,
       ctx,
     );
-    await loaderService.loadPlatformMetrics(ctx.tenantId, items);
+    await loaderService.load(ctx.tenantId, MetricType.PLATFORM, items);
 
     const expectedItems: PlatformMetricDto[] = [
       {
@@ -200,8 +204,12 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
     ];
 
     expect(items).toEqual(expectedItems);
-    expect(loadPlatformMetricsMock).toHaveBeenCalledTimes(1);
-    expect(loadPlatformMetricsMock).toHaveBeenCalledWith(ctx.tenantId, expectedItems);
+    expect(loadMock).toHaveBeenCalledTimes(1);
+    expect(loadMock).toHaveBeenCalledWith(
+      ctx.tenantId,
+      MetricType.PLATFORM,
+      expectedItems,
+    );
   });
 
   // Nghiệp vụ: query Elasticsearch phải gom theo labels.platform và lọc đúng các stage sent/received/rendered/render-failed.
@@ -259,7 +267,7 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
     );
   });
 
-  // Nghiệp vụ: sent=0 không được chia cho 0; dữ liệu lệch thời gian có thể làm received/rendered vượt mốc trước đó; avg NaN phải về 0.
+  // Nghiệp vụ: sent=0 không được chia cho 0; dữ liệu lệch thờ gian có thể làm received/rendered vượt mốc trước đó; avg NaN phải về 0.
   it('xử lý sent=0, received/rendered vượt mốc trước đó và avgRenderMs=NaN', async () => {
     const aggregations: PlatformMetricsAggs = {
       platforms: {
@@ -288,7 +296,7 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
       extracted.aggregations,
       ctx,
     );
-    await loaderService.loadPlatformMetrics(ctx.tenantId, items);
+    await loaderService.load(ctx.tenantId, MetricType.PLATFORM, items);
 
     expect(items[0]).toMatchObject({
       platform: 'web',
@@ -314,7 +322,11 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
       netSuccessRate: 120,
       avgRenderMs: 0,
     });
-    expect(loadPlatformMetricsMock).toHaveBeenCalledWith(ctx.tenantId, items);
+    expect(loadMock).toHaveBeenCalledWith(
+      ctx.tenantId,
+      MetricType.PLATFORM,
+      items,
+    );
   });
 
   // Nghiệp vụ: event thiếu labels.platform từ ES phải được gom vào platform unknown và vẫn được load.
@@ -339,7 +351,7 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
       extracted.aggregations,
       ctx,
     );
-    await loaderService.loadPlatformMetrics(ctx.tenantId, items);
+    await loaderService.load(ctx.tenantId, MetricType.PLATFORM, items);
 
     expect(items).toEqual([
       {
@@ -360,6 +372,10 @@ describe('UC-02: Platform metrics cho một trận đấu', () => {
         intervalTo,
       },
     ]);
-    expect(loadPlatformMetricsMock).toHaveBeenCalledWith(ctx.tenantId, items);
+    expect(loadMock).toHaveBeenCalledWith(
+      ctx.tenantId,
+      MetricType.PLATFORM,
+      items,
+    );
   });
 });

@@ -2,7 +2,10 @@ import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { KafkaConsumerService } from '@modules/overlay-metrics-etl/kafka/kafka-consumer.service';
-import { KafkaProducerService, JobPayload } from '@modules/overlay-metrics-etl/kafka/kafka-producer.service';
+import {
+  KafkaProducerService,
+  JobPayload,
+} from '@modules/overlay-metrics-etl/kafka/kafka-producer.service';
 import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
 
 // ---------------------------------------------------------------------------
@@ -17,15 +20,19 @@ const subscribeMock = jest.fn().mockResolvedValue(undefined);
 const runMock = jest.fn().mockResolvedValue(undefined);
 const disconnectMock = jest.fn().mockResolvedValue(undefined);
 
-let capturedEachMessage: ((payload: {
-  topic: string;
-  partition: number;
-  message: { offset: string; value: Buffer | null; key: Buffer | null };
-}) => Promise<void>) | undefined;
+let capturedEachMessage:
+  | ((payload: {
+      topic: string;
+      partition: number;
+      message: { offset: string; value: Buffer | null; key: Buffer | null };
+    }) => Promise<void>)
+  | undefined;
 
-runMock.mockImplementation(({ eachMessage }: { eachMessage: typeof capturedEachMessage }) => {
-  capturedEachMessage = eachMessage;
-});
+runMock.mockImplementation(
+  ({ eachMessage }: { eachMessage: typeof capturedEachMessage }) => {
+    capturedEachMessage = eachMessage;
+  },
+);
 
 const mockConsumer = {
   connect: connectMock,
@@ -109,7 +116,9 @@ describe('KafkaConsumerService', () => {
     let kafkaProducer: { sendToDLQ: jest.Mock };
 
     beforeEach(async () => {
-      timelineProcessor = { processTimeline: jest.fn().mockResolvedValue(undefined) };
+      timelineProcessor = {
+        processTimeline: jest.fn().mockResolvedValue(undefined),
+      };
       kafkaProducer = { sendToDLQ: jest.fn().mockResolvedValue(undefined) };
 
       jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
@@ -150,8 +159,13 @@ describe('KafkaConsumerService', () => {
     let kafkaProducer: { sendJob: jest.Mock; sendToDLQ: jest.Mock };
 
     beforeEach(async () => {
-      timelineProcessor = { processTimeline: jest.fn().mockRejectedValue(new Error('ES timeout')) };
-      kafkaProducer = { sendJob: jest.fn().mockResolvedValue(undefined), sendToDLQ: jest.fn().mockResolvedValue(undefined) };
+      timelineProcessor = {
+        processTimeline: jest.fn().mockRejectedValue(new Error('ES timeout')),
+      };
+      kafkaProducer = {
+        sendJob: jest.fn().mockResolvedValue(undefined),
+        sendToDLQ: jest.fn().mockResolvedValue(undefined),
+      };
 
       jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
       jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
@@ -212,7 +226,9 @@ describe('KafkaConsumerService', () => {
     let kafkaProducer: { sendToDLQ: jest.Mock };
 
     beforeEach(async () => {
-      timelineProcessor = { processTimeline: jest.fn().mockResolvedValue(undefined) };
+      timelineProcessor = {
+        processTimeline: jest.fn().mockResolvedValue(undefined),
+      };
       kafkaProducer = { sendToDLQ: jest.fn().mockResolvedValue(undefined) };
 
       jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);

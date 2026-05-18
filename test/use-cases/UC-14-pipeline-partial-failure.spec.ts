@@ -1,41 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { ExtractorService } from '@modules/overlay-metrics-etl/extractor/extractor.service';
-import { LoaderService } from '@modules/overlay-metrics-etl/loader/loader.service';
 import { TimelineProcessorService } from '@modules/overlay-metrics-etl/kafka/timeline-processor.service';
-import { TransformerService } from '@modules/overlay-metrics-etl/transformer/transformer.service';
-import type { TransformContext } from '@modules/overlay-metrics-etl/interfaces/transform-context.interface';
+import { METRIC_PIPELINES } from '@modules/overlay-metrics-etl/pipelines/pipelines.module';
+import type { MetricPipeline } from '@modules/overlay-metrics-etl/pipelines/metric-pipeline.interface';
+import { MetricType } from '@domain/enums/metric-type.enum';
 
-type ExtractorMethod =
-  | 'extractPlatformMetrics'
-  | 'extractDeviceBreakdown'
-  | 'extractTransportComparison'
-  | 'extractSdkVersions'
-  | 'extractFailures'
-  | 'extractLatency'
-  | 'extractTimeseries';
-
-type TransformerMethod =
-  | 'transformPlatformMetrics'
-  | 'transformDeviceBreakdown'
-  | 'transformTransportComparison'
-  | 'transformSdkVersions'
-  | 'transformFailures'
-  | 'transformLatency'
-  | 'transformTimeseries';
-
-type LoaderMethod =
-  | 'loadPlatformMetrics'
-  | 'loadDeviceBreakdown'
-  | 'loadTransportComparison'
-  | 'loadSdkVersions'
-  | 'loadFailures'
-  | 'loadLatency'
-  | 'loadTimeseries';
-
-type ExtractorMock = Record<ExtractorMethod, jest.Mock>;
-type TransformerMock = Record<TransformerMethod, jest.Mock>;
-type LoaderMock = Record<LoaderMethod, jest.Mock>;
 type FailureScenario = 'device' | 'sdk' | 'timeseries';
 
 type MongoState = {
@@ -51,8 +20,6 @@ type MongoState = {
 type ScenarioContext = {
   moduleRef: TestingModule;
   timelineProcessor: TimelineProcessorService;
-  extractor: ExtractorMock;
-  loader: LoaderMock;
   mongoState: MongoState;
 };
 
@@ -66,10 +33,6 @@ describe('UC-14 - Pipeline partial failure: log error và throw để consumer r
   let logSpy: jest.SpyInstance;
   let errorSpy: jest.SpyInstance;
   let warnSpy: jest.SpyInstance;
-
-  const aggResult = (name: string) => ({
-    aggregations: { name },
-  });
 
   const buildPayload = () => ({
     tenantId,
@@ -90,281 +53,303 @@ describe('UC-14 - Pipeline partial failure: log error và throw để consumer r
     timeseries: [],
   });
 
-  const createTransformer = (): TransformerMock => ({
-    transformPlatformMetrics: jest
-      .fn()
-      .mockImplementation((_aggregations: unknown, ctx: TransformContext) => [
-        {
-          tenantId: ctx.tenantId,
-          timelineId: ctx.timelineId,
-          matchId: ctx.matchId,
+  const createMockPipelines = (
+    scenario: FailureScenario,
+    mongoState: MongoState,
+  ): MetricPipeline[] => [
+    {
+      type: MetricType.PLATFORM,
+      execute: jest.fn().mockImplementation(async () => {
+        mongoState.platform.push({
+          tenantId,
+          timelineId,
+          matchId,
           platform: 'web',
-          intervalFrom: ctx.intervalFrom,
-          intervalTo: ctx.intervalTo,
-        },
-      ]),
-    transformDeviceBreakdown: jest
-      .fn()
-      .mockImplementation(
-        (_aggregations: unknown, ctx: TransformContext, dimension: string) => [
-          {
-            tenantId: ctx.tenantId,
-            timelineId: ctx.timelineId,
-            matchId: ctx.matchId,
-            dimension,
-            bucketKey: `${dimension}-bucket`,
-            intervalFrom: ctx.intervalFrom,
-            intervalTo: ctx.intervalTo,
-          },
-        ],
-      ),
-    transformTransportComparison: jest
-      .fn()
-      .mockImplementation((_aggregations: unknown, ctx: TransformContext) => [
-        {
-          tenantId: ctx.tenantId,
-          timelineId: ctx.timelineId,
-          matchId: ctx.matchId,
-          transportMode: 'wsInteractive',
-          intervalFrom: ctx.intervalFrom,
-          intervalTo: ctx.intervalTo,
-        },
-      ]),
-    transformSdkVersions: jest
-      .fn()
-      .mockImplementation((_aggregations: unknown, ctx: TransformContext) => [
-        {
-          tenantId: ctx.tenantId,
-          timelineId: ctx.timelineId,
-          matchId: ctx.matchId,
-          sdkVersion: '2.1.0',
-          intervalFrom: ctx.intervalFrom,
-          intervalTo: ctx.intervalTo,
-        },
-      ]),
-    transformFailures: jest
-      .fn()
-      .mockImplementation((_aggregations: unknown, ctx: TransformContext) => [
-        {
-          tenantId: ctx.tenantId,
-          timelineId: ctx.timelineId,
-          matchId: ctx.matchId,
-          failureReason: 'timeout',
-          failureStep: 'render',
-          intervalFrom: ctx.intervalFrom,
-          intervalTo: ctx.intervalTo,
-        },
-      ]),
-    transformLatency: jest
-      .fn()
-      .mockImplementation((_aggregations: unknown, ctx: TransformContext) => ({
-        tenantId: ctx.tenantId,
-        timelineId: ctx.timelineId,
-        matchId: ctx.matchId,
-        intervalFrom: ctx.intervalFrom,
-        intervalTo: ctx.intervalTo,
-        receive: { p50: 10, p75: 12, p95: 15, p99: 18, avg: 11, max: 20 },
-        render: { p50: 20, p75: 25, p95: 30, p99: 35, avg: 24, max: 40 },
-        ack: { p50: 1, p75: 1.5, p95: 2, p99: 3, avg: 1.2, max: 4 },
-        renderDuration: { p50: 30, p95: 40, p99: 50, avg: 35 },
-      })),
-    transformTimeseries: jest
-      .fn()
-      .mockImplementation(
-        (_aggregations: unknown, ctx: TransformContext, metric: string) => [
-          {
-            tenantId: ctx.tenantId,
-            timelineId: ctx.timelineId,
-            matchId: ctx.matchId,
-            metric,
-            interval: '5m',
-            time: ctx.intervalFrom,
-            value: 100,
-          },
-        ],
-      ),
-  });
-
-  const createExtractor = (scenario: FailureScenario): ExtractorMock => ({
-    extractPlatformMetrics: jest.fn().mockResolvedValue(aggResult('platform')),
-    extractDeviceBreakdown: jest
-      .fn()
-      .mockImplementation(async (_query: unknown, _dimension: string) => {
+          intervalFrom,
+          intervalTo,
+        });
+      }),
+    },
+    {
+      type: MetricType.DEVICE,
+      execute: jest.fn().mockImplementation(async () => {
         if (scenario === 'device') {
           throw new Error('Step 2 (Device) extractor failed');
         }
-        return aggResult('device');
+        mongoState.device.push(
+          {
+            tenantId,
+            timelineId,
+            matchId,
+            dimension: 'browser',
+            bucketKey: 'browser-bucket',
+            intervalFrom,
+            intervalTo,
+          },
+          {
+            tenantId,
+            timelineId,
+            matchId,
+            dimension: 'os',
+            bucketKey: 'os-bucket',
+            intervalFrom,
+            intervalTo,
+          },
+          {
+            tenantId,
+            timelineId,
+            matchId,
+            dimension: 'deviceClass',
+            bucketKey: 'deviceClass-bucket',
+            intervalFrom,
+            intervalTo,
+          },
+        );
       }),
-    extractTransportComparison: jest
-      .fn()
-      .mockResolvedValue(aggResult('transport')),
-    extractSdkVersions: jest.fn().mockImplementation(async () => {
-      if (scenario === 'sdk') {
-        throw new Error('Step 4 (SDK) extractor failed');
-      }
-      return aggResult('sdk');
-    }),
-    extractFailures: jest.fn().mockResolvedValue(aggResult('failures')),
-    extractLatency: jest.fn().mockResolvedValue(aggResult('latency')),
-    extractTimeseries: jest
-      .fn()
-      .mockImplementation(async (_query: unknown, metric: string) => {
-        if (scenario === 'timeseries' && metric === 'avgRenderMs') {
-          throw new Error('Step 7 (Timeseries) extractor failed at avgRenderMs');
+    },
+    {
+      type: MetricType.TRANSPORT,
+      execute: jest.fn().mockImplementation(async () => {
+        mongoState.transport.push({
+          tenantId,
+          timelineId,
+          matchId,
+          transportMode: 'wsInteractive',
+          intervalFrom,
+          intervalTo,
+        });
+      }),
+    },
+    {
+      type: MetricType.SDK,
+      execute: jest.fn().mockImplementation(async () => {
+        if (scenario === 'sdk') {
+          throw new Error('Step 4 (SDK) extractor failed');
         }
-        return aggResult(`timeseries-${metric}`);
+        mongoState.sdk.push({
+          tenantId,
+          timelineId,
+          matchId,
+          sdkVersion: '2.1.0',
+          intervalFrom,
+          intervalTo,
+        });
       }),
-  });
+    },
+    {
+      type: MetricType.FAILURE,
+      execute: jest.fn().mockImplementation(async () => {
+        mongoState.failures.push({
+          tenantId,
+          timelineId,
+          matchId,
+          failureReason: 'timeout',
+          failureStep: 'render',
+          intervalFrom,
+          intervalTo,
+        });
+      }),
+    },
+    {
+      type: MetricType.LATENCY,
+      execute: jest.fn().mockImplementation(async () => {
+        mongoState.latency.push({
+          tenantId,
+          timelineId,
+          matchId,
+          intervalFrom,
+          intervalTo,
+          receive: { p50: 10, p75: 12, p95: 15, p99: 18, avg: 11, max: 20 },
+          render: { p50: 20, p75: 25, p95: 30, p99: 35, avg: 24, max: 40 },
+          ack: { p50: 1, p75: 1.5, p95: 2, p99: 3, avg: 1.2, max: 4 },
+          renderDuration: { p50: 30, p95: 40, p99: 50, avg: 35 },
+        });
+      }),
+    },
+    {
+      type: MetricType.TIMESERIES,
+      execute: jest.fn().mockImplementation(async () => {
+        if (scenario === 'timeseries') {
+          mongoState.timeseries.push(
+            {
+              tenantId,
+              timelineId,
+              matchId,
+              metric: 'sent',
+              interval: '5m',
+              time: intervalFrom,
+              value: 100,
+            },
+            {
+              tenantId,
+              timelineId,
+              matchId,
+              metric: 'received',
+              interval: '5m',
+              time: intervalFrom,
+              value: 100,
+            },
+            {
+              tenantId,
+              timelineId,
+              matchId,
+              metric: 'rendered',
+              interval: '5m',
+              time: intervalFrom,
+              value: 100,
+            },
+            {
+              tenantId,
+              timelineId,
+              matchId,
+              metric: 'failed',
+              interval: '5m',
+              time: intervalFrom,
+              value: 100,
+            },
+          );
+          throw new Error(
+            'Step 7 (Timeseries) extractor failed at avgRenderMs',
+          );
+        }
+        mongoState.timeseries.push(
+          {
+            tenantId,
+            timelineId,
+            matchId,
+            metric: 'sent',
+            interval: '5m',
+            time: intervalFrom,
+            value: 100,
+          },
+          {
+            tenantId,
+            timelineId,
+            matchId,
+            metric: 'received',
+            interval: '5m',
+            time: intervalFrom,
+            value: 100,
+          },
+          {
+            tenantId,
+            timelineId,
+            matchId,
+            metric: 'rendered',
+            interval: '5m',
+            time: intervalFrom,
+            value: 100,
+          },
+          {
+            tenantId,
+            timelineId,
+            matchId,
+            metric: 'failed',
+            interval: '5m',
+            time: intervalFrom,
+            value: 100,
+          },
+          {
+            tenantId,
+            timelineId,
+            matchId,
+            metric: 'avgRenderMs',
+            interval: '5m',
+            time: intervalFrom,
+            value: 100,
+          },
+        );
+      }),
+    },
+  ];
 
-  const createLoader = (mongoState: MongoState): LoaderMock => ({
-    loadPlatformMetrics: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
-      mongoState.platform.push(...items);
-    }),
-    loadDeviceBreakdown: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
-      mongoState.device.push(...items);
-    }),
-    loadTransportComparison: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
-      mongoState.transport.push(...items);
-    }),
-    loadSdkVersions: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
-      mongoState.sdk.push(...items);
-    }),
-    loadFailures: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
-      mongoState.failures.push(...items);
-    }),
-    loadLatency: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
-      mongoState.latency.push(...items);
-    }),
-    loadTimeseries: jest.fn().mockImplementation(async (_tenantId: string, items: Record<string, unknown>[]) => {
-      mongoState.timeseries.push(...items);
-    }),
-  });
-
-  const setupScenario = async (scenario: FailureScenario): Promise<ScenarioContext> => {
+  const setupScenario = async (
+    scenario: FailureScenario,
+  ): Promise<ScenarioContext> => {
     const mongoState = createMongoState();
-    const extractor = createExtractor(scenario);
-    const transformer = createTransformer();
-    const loader = createLoader(mongoState);
+    const mockPipelines = createMockPipelines(scenario, mongoState);
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         TimelineProcessorService,
-        { provide: ExtractorService, useValue: extractor },
-        { provide: TransformerService, useValue: transformer },
-        { provide: LoaderService, useValue: loader },
+        { provide: METRIC_PIPELINES, useValue: mockPipelines },
       ],
     }).compile();
 
     return {
       moduleRef,
       timelineProcessor: moduleRef.get(TimelineProcessorService),
-      extractor,
-      loader,
       mongoState,
     };
   };
 
   const lastErrorMessage = (): string => {
-    const lastCall = errorSpy.mock.calls.at(-1);
+    const lastCall = errorSpy.mock.calls[errorSpy.mock.calls.length - 1];
     return typeof lastCall?.[0] === 'string' ? lastCall[0] : '';
   };
 
   beforeEach(() => {
-    logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
-    warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    logSpy = jest
+      .spyOn(Logger.prototype, 'log')
+      .mockImplementation(() => undefined);
+    errorSpy = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    warnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it('giữ data của steps 1-3 và dừng steps 5-7 khi step 4 SDK fail, throw để consumer retry', async () => {
+  it('giữ data của pipelines thành công và throw tổng hợp khi pipeline SDK fail', async () => {
     const ctx = await setupScenario('sdk');
 
-    // TimelineProcessorService throw ngay khi pipeline step fail để Kafka consumer xử lý retry/DLQ
-    await expect(ctx.timelineProcessor.processTimeline(buildPayload())).rejects.toThrow('Step 4 (SDK) extractor failed');
-
-    expect(ctx.loader.loadPlatformMetrics).toHaveBeenCalledTimes(1);
-    expect(ctx.loader.loadDeviceBreakdown).toHaveBeenCalledTimes(3);
-    expect(ctx.loader.loadTransportComparison).toHaveBeenCalledTimes(1);
-    expect(ctx.loader.loadSdkVersions).not.toHaveBeenCalled();
-
-    expect(ctx.extractor.extractFailures).not.toHaveBeenCalled();
-    expect(ctx.extractor.extractLatency).not.toHaveBeenCalled();
-    expect(ctx.extractor.extractTimeseries).not.toHaveBeenCalled();
+    await expect(
+      ctx.timelineProcessor.processTimeline(buildPayload()),
+    ).rejects.toThrow(/failed pipelines: sdk/);
 
     expect(ctx.mongoState.platform).toHaveLength(1);
     expect(ctx.mongoState.device).toHaveLength(3);
     expect(ctx.mongoState.transport).toHaveLength(1);
     expect(ctx.mongoState.sdk).toHaveLength(0);
-    expect(ctx.mongoState.failures).toHaveLength(0);
-    expect(ctx.mongoState.latency).toHaveLength(0);
-    expect(ctx.mongoState.timeseries).toHaveLength(0);
+    expect(ctx.mongoState.failures).toHaveLength(1);
+    expect(ctx.mongoState.latency).toHaveLength(1);
+    expect(ctx.mongoState.timeseries).toHaveLength(5);
 
     expect(lastErrorMessage()).toContain('Step 4 (SDK) extractor failed');
 
     await ctx.moduleRef.close();
   });
 
-  it('fail ở step 2 Device thì chỉ step 1 đã commit, throw để consumer retry', async () => {
+  it('fail ở pipeline Device thì platform vẫn persist, throw tổng hợp để consumer retry', async () => {
     const ctx = await setupScenario('device');
 
-    await expect(ctx.timelineProcessor.processTimeline(buildPayload())).rejects.toThrow('Step 2 (Device) extractor failed');
-
-    expect(ctx.loader.loadPlatformMetrics).toHaveBeenCalledTimes(1);
-    expect(ctx.loader.loadDeviceBreakdown).not.toHaveBeenCalled();
-    expect(ctx.loader.loadTransportComparison).not.toHaveBeenCalled();
-    expect(ctx.loader.loadSdkVersions).not.toHaveBeenCalled();
-    expect(ctx.loader.loadFailures).not.toHaveBeenCalled();
-    expect(ctx.loader.loadLatency).not.toHaveBeenCalled();
-    expect(ctx.loader.loadTimeseries).not.toHaveBeenCalled();
-
-    expect(ctx.extractor.extractDeviceBreakdown).toHaveBeenCalledTimes(1);
-    expect(ctx.extractor.extractTransportComparison).not.toHaveBeenCalled();
-    expect(ctx.extractor.extractSdkVersions).not.toHaveBeenCalled();
-    expect(ctx.extractor.extractFailures).not.toHaveBeenCalled();
-    expect(ctx.extractor.extractLatency).not.toHaveBeenCalled();
-    expect(ctx.extractor.extractTimeseries).not.toHaveBeenCalled();
+    await expect(
+      ctx.timelineProcessor.processTimeline(buildPayload()),
+    ).rejects.toThrow(/failed pipelines: device/);
 
     expect(ctx.mongoState.platform).toHaveLength(1);
     expect(ctx.mongoState.device).toHaveLength(0);
-    expect(ctx.mongoState.transport).toHaveLength(0);
-    expect(ctx.mongoState.sdk).toHaveLength(0);
-    expect(ctx.mongoState.failures).toHaveLength(0);
-    expect(ctx.mongoState.latency).toHaveLength(0);
-    expect(ctx.mongoState.timeseries).toHaveLength(0);
+    expect(ctx.mongoState.transport).toHaveLength(1);
+    expect(ctx.mongoState.sdk).toHaveLength(1);
+    expect(ctx.mongoState.failures).toHaveLength(1);
+    expect(ctx.mongoState.latency).toHaveLength(1);
+    expect(ctx.mongoState.timeseries).toHaveLength(5);
 
     expect(lastErrorMessage()).toContain('Step 2 (Device) extractor failed');
 
     await ctx.moduleRef.close();
   });
 
-  it('fail ở step 7 Timeseries cuối thì data các step trước vẫn giữ nguyên, throw để consumer retry', async () => {
+  it('fail ở pipeline Timeseries cuối thì data các pipeline trước vẫn giữ nguyên, throw tổng hợp để consumer retry', async () => {
     const ctx = await setupScenario('timeseries');
 
-    await expect(ctx.timelineProcessor.processTimeline(buildPayload())).rejects.toThrow('Step 7 (Timeseries) extractor failed at avgRenderMs');
-
-    expect(ctx.loader.loadPlatformMetrics).toHaveBeenCalledTimes(1);
-    expect(ctx.loader.loadDeviceBreakdown).toHaveBeenCalledTimes(3);
-    expect(ctx.loader.loadTransportComparison).toHaveBeenCalledTimes(1);
-    expect(ctx.loader.loadSdkVersions).toHaveBeenCalledTimes(1);
-    expect(ctx.loader.loadFailures).toHaveBeenCalledTimes(1);
-    expect(ctx.loader.loadLatency).toHaveBeenCalledTimes(1);
-    expect(ctx.loader.loadTimeseries).toHaveBeenCalledTimes(4);
-
-    expect(ctx.extractor.extractTimeseries).toHaveBeenCalledTimes(5);
-    expect(ctx.extractor.extractTimeseries).toHaveBeenNthCalledWith(
-      5,
-      {
-        timelineIds: [timelineId],
-        tenantId,
-        from: intervalFrom,
-        to: intervalTo,
-      },
-      'avgRenderMs',
-      '5m',
-    );
+    await expect(
+      ctx.timelineProcessor.processTimeline(buildPayload()),
+    ).rejects.toThrow(/failed pipelines: timeseries/);
 
     expect(ctx.mongoState.platform).toHaveLength(1);
     expect(ctx.mongoState.device).toHaveLength(3);
@@ -380,7 +365,9 @@ describe('UC-14 - Pipeline partial failure: log error và throw để consumer r
       'failed',
     ]);
 
-    expect(lastErrorMessage()).toContain('Step 7 (Timeseries) extractor failed at avgRenderMs');
+    expect(lastErrorMessage()).toContain(
+      'Step 7 (Timeseries) extractor failed at avgRenderMs',
+    );
 
     await ctx.moduleRef.close();
   });

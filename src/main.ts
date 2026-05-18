@@ -27,6 +27,12 @@ async function bootstrap() {
         { type: 'apiKey', name: 'x-tenant-id', in: 'header' },
         'x-tenant-id',
       )
+      .addApiKey(
+        { type: 'apiKey', name: 'x-internal-api-key', in: 'header' },
+        'x-internal-api-key',
+      )
+      .addSecurityRequirements('x-tenant-id')
+      .addSecurityRequirements('x-internal-api-key')
       .build();
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);
